@@ -84,7 +84,8 @@ def validate_stockholm_file(filepath):
         parts = stripped.split(None, 1)  # Split on first whitespace only
         if len(parts) >= 2:
             seq_name = parts[0]
-            seq_data = parts[1].replace(' ', '')  # Remove internal spaces
+            # Remove internal spaces - Stockholm format allows spaces in sequence data
+            seq_data = parts[1].replace(' ', '')
             
             if seq_name in sequences:
                 # Append to existing sequence (Stockholm can have interleaved format)

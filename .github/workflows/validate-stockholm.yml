@@ -27,7 +27,12 @@ jobs:
         id: changed-files
         run: |
           # Get the list of changed .so, .sto, and .stk files
-          git diff --name-only --diff-filter=ACMRT ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | \
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA="origin/main"
+          fi
+          
+          git diff --name-only --diff-filter=ACMRT "$BASE_SHA" ${{ github.sha }} | \
             grep -E '\.(so|sto|stk)$' > changed_files.txt || true
           
           if [ -s changed_files.txt ]; then
@@ -42,10 +47,10 @@ jobs:
       - name: Validate Stockholm files
         if: steps.changed-files.outputs.has_files == 'true'
         run: |
-          # Read files from changed_files.txt and validate
+          # Read files from changed_files.txt and validate using xargs
           if [ -f changed_files.txt ] && [ -s changed_files.txt ]; then
             echo "Validating Stockholm files..."
-            python3 validate_stockholm.py -v $(cat changed_files.txt | tr '\n' ' ')
+            cat changed_files.txt | xargs python3 validate_stockholm.py -v
           else
             echo "No files to validate"
           fi
