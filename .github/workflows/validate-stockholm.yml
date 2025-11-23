@@ -1,0 +1,63 @@
+name: Validate Stockholm Files
+
+on:
+  pull_request:
+    paths:
+      - '**.so'
+      - '**.sto'
+      - '**.stk'
+
+jobs:
+  validate:
+    name: Validate Stockholm MSA Files
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      
+      - name: Get changed Stockholm files
+        id: changed-files
+        run: |
+          # Get the list of changed .so, .sto, and .stk files
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA="origin/main"
+          fi
+          
+          git diff --name-only --diff-filter=ACMRT "$BASE_SHA" ${{ github.sha }} | \
+            grep -E '\.(so|sto|stk)$' > changed_files.txt || true
+          
+          if [ -s changed_files.txt ]; then
+            echo "has_files=true" >> $GITHUB_OUTPUT
+            echo "Changed Stockholm files:"
+            cat changed_files.txt
+          else
+            echo "has_files=false" >> $GITHUB_OUTPUT
+            echo "No Stockholm files changed"
+          fi
+      
+      - name: Validate Stockholm files
+        if: steps.changed-files.outputs.has_files == 'true'
+        run: |
+          # Read files from changed_files.txt and validate using xargs
+          if [ -f changed_files.txt ] && [ -s changed_files.txt ]; then
+            echo "Validating Stockholm files..."
+            cat changed_files.txt | xargs python3 validate_stockholm.py -v
+          else
+            echo "No files to validate"
+          fi
+      
+      - name: Report success
+        if: steps.changed-files.outputs.has_files == 'false'
+        run: |
+          echo "✓ No Stockholm files were modified in this PR"
