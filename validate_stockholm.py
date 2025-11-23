@@ -1,263 +1,179 @@
 #!/usr/bin/env python3
 """
-Simple Stockholm format validator for MSA files.
+Stockholm format validator for MSA files.
 
 This script validates Stockholm format alignment files (.so, .sto, .stk)
 by checking for required structural elements and basic formatting.
-It also removes duplicate sequences from the alignment.
+It can automatically fix certain errors like duplicate sequences.
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-
-def parse_sequence_identifier(seq_name):
-    """
-    Parse sequence identifier to extract accession and coordinates.
-    
-    Format: ACCESSION/START-END (e.g., AF228364.1/1-74)
-    
-    Args:
-        seq_name: Sequence identifier string
-        
-    Returns:
-        tuple: (accession, coordinates) or (seq_name, None) if no coordinates found
-    """
-    if '/' in seq_name:
-        parts = seq_name.split('/', 1)
-        return parts[0], parts[1]
-    return seq_name, None
+# Import validation modules
+from scripts import fatal_errors, fixable_errors, warnings, parser
 
 
-def validate_stockholm_file(filepath, check_duplicates=False):
+def validate_stockholm_file(filepath):
     """
     Validate a Stockholm format alignment file.
     
     Args:
         filepath: Path to the Stockholm file to validate
-        check_duplicates: If True, count duplicate sequences
         
     Returns:
-        tuple: (bool, list, int, list) - (is_valid, list_of_errors, num_duplicates_found, list_of_warnings)
+        dict: Validation results with errors, warnings, and fixable issues
     """
-    errors = []
-    warnings = []
-    num_duplicates = 0
-    
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
     except Exception as e:
-        return False, [f"Failed to read file: {e}"], 0, []
+        return {
+            'is_valid': False,
+            'fatal_errors': [f"Failed to read file: {e}"],
+            'fixable_errors': [],
+            'warnings': [],
+            'can_be_fixed': False
+        }
     
-    if not lines:
-        return False, ["File is empty"], 0, []
+    # Parse the file
+    parsed = parser.parse_stockholm_file(lines)
+    sequence_entries = parsed['sequence_entries']
     
-    # Check for required elements and parse sequences in single pass
-    header_found = False
-    terminator_found = False
-    ss_cons_found = False
-    sequences = {}
+    # Build unique sequences dict for validation
+    unique_sequences, duplicates = fixable_errors.find_duplicates_from_entries(sequence_entries)
     
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        
-        # Check for Stockholm header
-        if stripped.startswith('# STOCKHOLM'):
-            header_found = True
-            # Validate version (typically 1.0)
-            parts = stripped.split()
-            if len(parts) >= 3:
-                version = parts[2]
-                if version != '1.0':
-                    errors.append(f"Line {i+1}: Non-standard Stockholm version '{version}' (expected 1.0)")
-        
-        # Check for terminator
-        elif stripped == '//':
-            terminator_found = True
-        
-        # Check for 2D structure consensus annotation
-        elif stripped.startswith('#=GC SS_cons'):
-            ss_cons_found = True
-        
-        # Parse sequence lines (skip empty, comments, markup, and terminator)
-        elif stripped and not stripped.startswith('#'):
-            parts = stripped.split(None, 1)  # Split on first whitespace only
-            if len(parts) >= 2:
-                seq_name = parts[0]
-                # Remove internal spaces - Stockholm format allows spaces in sequence data
-                seq_data = parts[1].replace(' ', '')
-                
-                if seq_name in sequences:
-                    # Append to existing sequence (Stockholm can have interleaved format)
-                    sequences[seq_name] += seq_data
-                else:
-                    sequences[seq_name] = seq_data
+    # Collect errors and warnings
+    fatal_error_list = []
+    fixable_error_list = []
+    warning_list = []
     
-    if not header_found:
-        errors.append("Missing required '# STOCKHOLM 1.0' header")
+    # Check for fatal errors
+    is_valid, error_msg = fatal_errors.check_empty_file(lines)
+    if not is_valid:
+        fatal_error_list.append(error_msg)
+        return {
+            'is_valid': False,
+            'fatal_errors': fatal_error_list,
+            'fixable_errors': [],
+            'warnings': [],
+            'can_be_fixed': False
+        }
     
-    if not terminator_found:
-        errors.append("Missing required '//' terminator")
+    is_valid, error_msg, line_num = fatal_errors.check_header(lines)
+    if not is_valid:
+        fatal_error_list.append(error_msg)
     
-    if not ss_cons_found:
-        warnings.append("Missing 2D structure consensus annotation (#=GC SS_cons)")
+    is_valid, error_msg = fatal_errors.check_terminator(lines)
+    if not is_valid:
+        fatal_error_list.append(error_msg)
     
-    if not sequences:
-        errors.append("No sequences found in alignment")
+    is_valid, error_msg = fatal_errors.check_no_sequences(unique_sequences)
+    if not is_valid:
+        fatal_error_list.append(error_msg)
     
-    # Check for duplicates if requested
-    if check_duplicates and sequences:
-        unique_sequences = {}
-        duplicates_found = []
-        
-        for seq_name, seq_data in sequences.items():
-            accession, coords = parse_sequence_identifier(seq_name)
-            key = (accession, coords, seq_data)
-            
-            if key not in unique_sequences:
-                unique_sequences[key] = seq_name
-            else:
-                duplicates_found.append(seq_name)
-        
-        num_duplicates = len(duplicates_found)
+    # Check sequence length consistency
+    is_valid, error_msg = fatal_errors.check_sequence_lengths(unique_sequences)
+    if not is_valid:
+        fatal_error_list.append(error_msg)
     
-    is_valid = len(errors) == 0
-    return is_valid, errors, num_duplicates, warnings
+    # Check sequence characters
+    is_valid, error_msg = fatal_errors.check_sequence_characters(unique_sequences)
+    if not is_valid:
+        fatal_error_list.append(error_msg)
+    
+    # Check for fixable errors
+    if len(duplicates) > 0:
+        fixable_error_list.append(f"Found {len(duplicates)} duplicate sequence(s)")
+    
+    # Check for warnings
+    has_warning, warning_msg = warnings.check_ss_cons(lines)
+    if has_warning:
+        warning_list.append(warning_msg)
+    
+    has_warning, warning_msgs = warnings.check_line_length(lines)
+    if has_warning:
+        warning_list.extend(warning_msgs)
+    
+    # Determine if file can be fixed
+    can_be_fixed = len(fatal_error_list) == 0 and len(fixable_error_list) > 0
+    
+    return {
+        'is_valid': len(fatal_error_list) == 0,
+        'fatal_errors': fatal_error_list,
+        'fixable_errors': fixable_error_list,
+        'warnings': warning_list,
+        'can_be_fixed': can_be_fixed,
+        'lines': lines
+    }
 
 
-def remove_duplicates_from_file(filepath, output_filepath=None):
+def fix_file(filepath, output_mode='file'):
     """
-    Remove duplicate sequences from a Stockholm file.
-    
-    Duplicates are defined as sequences with the same accession/identifier,
-    coordinates, and exact sequence data.
+    Fix fixable errors in a Stockholm file.
     
     Args:
         filepath: Path to input Stockholm file
-        output_filepath: Path to output file (if None, overwrites input)
+        output_mode: 'stdout' to print to stdout, 'file' to create _corrected file
         
     Returns:
-        int: Number of duplicates removed
+        tuple: (success, num_fixes_applied, output_path)
     """
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
     except Exception as e:
-        print(f"Error reading file: {e}")
-        return 0
+        print(f"Error reading file: {e}", file=sys.stderr)
+        return False, 0, None
     
-    # Separate different types of lines
-    header_lines = []
-    annotation_lines = []
-    footer_lines = []
-    sequence_entries = []  # List of (seq_name, seq_content) tuples
+    # Apply fixes (currently only duplicate removal)
+    corrected_lines, num_duplicates = fixable_errors.remove_duplicates(lines)
     
-    sequences_started = False
-    sequences_ended = False
-    
-    for line in lines:
-        stripped = line.strip()
+    if output_mode == 'stdout':
+        # Print to stdout
+        for line in corrected_lines:
+            print(line, end='')
+        return True, num_duplicates, None
+    else:
+        # Create _corrected file
+        path = Path(filepath)
+        output_path = path.parent / f"{path.stem}_corrected{path.suffix}"
         
-        if stripped == '//':
-            sequences_ended = True
-            footer_lines.append(line)
-        elif sequences_ended:
-            footer_lines.append(line)
-        elif stripped.startswith('# STOCKHOLM'):
-            header_lines.append(line)
-            sequences_started = True
-        elif stripped.startswith('#=GF') or stripped.startswith('#=GC') or stripped.startswith('#=GS') or stripped.startswith('#=GR'):
-            annotation_lines.append(line)
-        elif stripped.startswith('#'):
-            if not sequences_started:
-                header_lines.append(line)
-            else:
-                annotation_lines.append(line)
-        elif stripped:
-            # This is a sequence line
-            parts = stripped.split(None, 1)
-            if len(parts) >= 2:
-                seq_name = parts[0]
-                seq_content = parts[1].replace(' ', '')
-                sequence_entries.append((seq_name, seq_content))
-        else:
-            # Empty line
-            if not sequences_started:
-                header_lines.append(line)
-            elif not sequences_ended:
-                # Keep empty lines in body
-                pass
-            else:
-                footer_lines.append(line)
-    
-    # Find duplicates based on accession, coordinates, and sequence
-    seen_keys = {}
-    unique_entries = []
-    duplicates_count = 0
-    
-    for seq_name, seq_content in sequence_entries:
-        accession, coords = parse_sequence_identifier(seq_name)
-        key = (accession, coords, seq_content)
+        with open(output_path, 'w') as f:
+            f.writelines(corrected_lines)
         
-        if key not in seen_keys:
-            seen_keys[key] = True
-            unique_entries.append((seq_name, seq_content))
-        else:
-            duplicates_count += 1
-    
-    # Write output file
-    if output_filepath is None:
-        output_filepath = filepath
-    
-    # Calculate max sequence name length for formatting
-    max_name_len = max(len(name) for name, _ in unique_entries) if unique_entries else 30
-    # Add some padding
-    name_width = max(max_name_len + 2, 30)
-    
-    with open(output_filepath, 'w') as f:
-        # Write header lines
-        for line in header_lines:
-            f.write(line)
-        
-        # Write unique sequences
-        for seq_name, seq_content in unique_entries:
-            f.write(f"{seq_name:<{name_width}} {seq_content}\n")
-        
-        # Write annotation lines
-        for line in annotation_lines:
-            f.write(line)
-        
-        # Write footer lines
-        for line in footer_lines:
-            f.write(line)
-    
-    return duplicates_count
+        return True, num_duplicates, str(output_path)
 
 
 def main():
     """Main function to run validation from command line."""
-    parser = argparse.ArgumentParser(
+    parser_arg = argparse.ArgumentParser(
         description='Validate Stockholm format MSA files'
     )
-    parser.add_argument(
+    parser_arg.add_argument(
         'files',
         nargs='+',
         help='Stockholm file(s) to validate'
     )
-    parser.add_argument(
+    parser_arg.add_argument(
         '-v', '--verbose',
         action='store_true',
         help='Print detailed validation information'
     )
-    parser.add_argument(
-        '--remove-duplicates',
+    parser_arg.add_argument(
+        '--fix',
         action='store_true',
-        help='Remove duplicate sequences (same accession, coordinates, and sequence)'
+        help='Attempt to fix fixable errors'
+    )
+    parser_arg.add_argument(
+        '--output-mode',
+        choices=['stdout', 'file'],
+        default='file',
+        help='Output mode for fixed files: stdout or create _corrected file (default: file)'
     )
     
-    args = parser.parse_args()
+    args = parser_arg.parse_args()
     
     all_valid = True
     
@@ -269,30 +185,58 @@ def main():
             all_valid = False
             continue
         
-        # Remove duplicates if requested
-        if args.remove_duplicates:
-            num_removed = remove_duplicates_from_file(filepath)
-            if num_removed > 0:
-                print(f"Removed {num_removed} duplicate sequence(s) from {filepath}")
+        # Validate the file
+        result = validate_stockholm_file(filepath)
         
-        is_valid, errors, num_duplicates, warnings = validate_stockholm_file(filepath, check_duplicates=not args.remove_duplicates)
+        # Handle fixing if requested
+        if args.fix and result['can_be_fixed']:
+            success, num_fixes, output_path = fix_file(filepath, args.output_mode)
+            if success:
+                if args.output_mode == 'file':
+                    print(f"✓ Fixed {num_fixes} issue(s) in {filepath}")
+                    print(f"  Corrected file saved to: {output_path}")
+                else:
+                    # Already printed to stdout
+                    pass
+                
+                # Re-validate the fixed content
+                if args.output_mode == 'file':
+                    result = validate_stockholm_file(output_path)
         
-        if is_valid:
-            # Print success message if verbose or if there are warnings
-            if args.verbose or warnings:
+        # Display results
+        if result['is_valid'] and not result['fixable_errors']:
+            if args.verbose or result['warnings']:
                 print(f"✓ {filepath}: Valid Stockholm file")
-                if args.verbose and not args.remove_duplicates and num_duplicates > 0:
-                    print(f"  Note: Found {num_duplicates} duplicate sequence(s)")
+            
             # Display warnings
-            for warning in warnings:
+            for warning in result['warnings']:
                 print(f"  ⚠ Warning: {warning}")
+        
+        elif result['is_valid'] and result['fixable_errors']:
+            print(f"⚠ {filepath}: Valid but has fixable issues")
+            for error in result['fixable_errors']:
+                print(f"  • {error}")
+            
+            # Display warnings
+            for warning in result['warnings']:
+                print(f"  ⚠ Warning: {warning}")
+            
+            if not args.fix:
+                print(f"  Tip: Use --fix to automatically correct these issues")
+        
         else:
             print(f"✗ {filepath}: INVALID")
-            for error in errors:
+            for error in result['fatal_errors']:
                 print(f"  - {error}")
-            # Display warnings even if there are errors
-            for warning in warnings:
+            
+            # Display fixable errors
+            for error in result['fixable_errors']:
+                print(f"  • Fixable: {error}")
+            
+            # Display warnings
+            for warning in result['warnings']:
                 print(f"  ⚠ Warning: {warning}")
+            
             all_valid = False
     
     if all_valid:
