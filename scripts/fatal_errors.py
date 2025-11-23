@@ -89,7 +89,11 @@ def check_sequence_lengths(sequences):
     unique_lengths = set(lengths.values())
     
     if len(unique_lengths) > 1:
-        return False, f"Sequences have inconsistent lengths: {lengths}"
+        # Show only first 5 sequences with their lengths for readability
+        length_items = list(lengths.items())[:5]
+        length_sample = {name: length for name, length in length_items}
+        suffix = f" (showing first {len(length_sample)} of {len(lengths)})" if len(lengths) > 5 else ""
+        return False, f"Sequences have inconsistent lengths: {length_sample}{suffix}"
     return True, None
 
 
@@ -107,21 +111,4 @@ def check_sequence_characters(sequences):
         # Check for whitespace
         if any(c.isspace() for c in seq_data):
             return False, f"Sequence '{seq_name}' contains whitespace characters"
-    return True, None
-
-
-def validate_gap_characters(sequences):
-    """
-    Validate that gaps are indicated by . or -.
-    
-    This is informational - we accept gaps as either . or -
-    
-    Args:
-        sequences: Dictionary of {seq_name: seq_data}
-        
-    Returns:
-        tuple: (is_valid, info_message)
-    """
-    # This is not a fatal error, just validation
-    # Gaps can be . or - and both are valid
     return True, None
