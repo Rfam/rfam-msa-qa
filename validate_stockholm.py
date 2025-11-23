@@ -30,16 +30,16 @@ def parse_sequence_identifier(seq_name):
     return seq_name, None
 
 
-def validate_stockholm_file(filepath, remove_duplicates=False):
+def validate_stockholm_file(filepath, check_duplicates=False):
     """
     Validate a Stockholm format alignment file.
     
     Args:
         filepath: Path to the Stockholm file to validate
-        remove_duplicates: If True, remove duplicate sequences
+        check_duplicates: If True, count duplicate sequences
         
     Returns:
-        tuple: (bool, list, int) - (is_valid, list_of_errors, num_duplicates_removed)
+        tuple: (bool, list, int) - (is_valid, list_of_errors, num_duplicates_found)
     """
     errors = []
     num_duplicates = 0
@@ -103,7 +103,7 @@ def validate_stockholm_file(filepath, remove_duplicates=False):
         errors.append("No sequences found in alignment")
     
     # Check for duplicates if requested
-    if remove_duplicates and sequences:
+    if check_duplicates and sequences:
         unique_sequences = {}
         duplicates_found = []
         
@@ -206,6 +206,11 @@ def remove_duplicates_from_file(filepath, output_filepath=None):
     if output_filepath is None:
         output_filepath = filepath
     
+    # Calculate max sequence name length for formatting
+    max_name_len = max(len(name) for name, _ in unique_entries) if unique_entries else 30
+    # Add some padding
+    name_width = max(max_name_len + 2, 30)
+    
     with open(output_filepath, 'w') as f:
         # Write header lines
         for line in header_lines:
@@ -213,7 +218,7 @@ def remove_duplicates_from_file(filepath, output_filepath=None):
         
         # Write unique sequences
         for seq_name, seq_content in unique_entries:
-            f.write(f"{seq_name:<30} {seq_content}\n")
+            f.write(f"{seq_name:<{name_width}} {seq_content}\n")
         
         # Write annotation lines
         for line in annotation_lines:
@@ -224,8 +229,6 @@ def remove_duplicates_from_file(filepath, output_filepath=None):
             f.write(line)
     
     return duplicates_count
-    
-    return len(duplicates_removed)
 
 
 def main():
@@ -267,7 +270,7 @@ def main():
             if num_removed > 0:
                 print(f"Removed {num_removed} duplicate sequence(s) from {filepath}")
         
-        is_valid, errors, num_duplicates = validate_stockholm_file(filepath, remove_duplicates=not args.remove_duplicates)
+        is_valid, errors, num_duplicates = validate_stockholm_file(filepath, check_duplicates=not args.remove_duplicates)
         
         if is_valid:
             if args.verbose:
