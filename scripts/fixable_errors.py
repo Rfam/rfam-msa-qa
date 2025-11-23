@@ -50,33 +50,6 @@ def find_duplicates_from_entries(sequence_entries):
     return unique_sequences, duplicate_indices
 
 
-def find_duplicates(sequences):
-    """
-    Find duplicate sequences based on accession, coordinates, and sequence data.
-    
-    Args:
-        sequences: Dictionary of {seq_name: seq_data}
-        
-    Returns:
-        tuple: (unique_seq_names, duplicate_seq_names)
-    """
-    seen_keys = {}
-    unique_seq_names = []
-    duplicate_seq_names = []
-    
-    for seq_name, seq_data in sequences.items():
-        accession, coords = parse_sequence_identifier(seq_name)
-        key = (accession, coords, seq_data)
-        
-        if key not in seen_keys:
-            seen_keys[key] = seq_name
-            unique_seq_names.append(seq_name)
-        else:
-            duplicate_seq_names.append(seq_name)
-    
-    return unique_seq_names, duplicate_seq_names
-
-
 def remove_duplicates(lines):
     """
     Remove duplicate sequences from Stockholm file lines.
