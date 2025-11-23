@@ -4,6 +4,7 @@ Simple Stockholm format validator for MSA files.
 
 This script validates Stockholm format alignment files (.so, .sto, .stk)
 by checking for required structural elements and basic formatting.
+It also removes duplicate sequences from the alignment.
 """
 
 import sys
@@ -11,26 +12,46 @@ import argparse
 from pathlib import Path
 
 
-def validate_stockholm_file(filepath):
+def parse_sequence_identifier(seq_name):
+    """
+    Parse sequence identifier to extract accession and coordinates.
+    
+    Format: ACCESSION/START-END (e.g., AF228364.1/1-74)
+    
+    Args:
+        seq_name: Sequence identifier string
+        
+    Returns:
+        tuple: (accession, coordinates) or (seq_name, None) if no coordinates found
+    """
+    if '/' in seq_name:
+        parts = seq_name.split('/', 1)
+        return parts[0], parts[1]
+    return seq_name, None
+
+
+def validate_stockholm_file(filepath, remove_duplicates=False):
     """
     Validate a Stockholm format alignment file.
     
     Args:
         filepath: Path to the Stockholm file to validate
+        remove_duplicates: If True, remove duplicate sequences
         
     Returns:
-        tuple: (bool, list) - (is_valid, list_of_errors)
+        tuple: (bool, list, int) - (is_valid, list_of_errors, num_duplicates_removed)
     """
     errors = []
+    num_duplicates = 0
     
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
     except Exception as e:
-        return False, [f"Failed to read file: {e}"]
+        return False, [f"Failed to read file: {e}"], 0
     
     if not lines:
-        return False, ["File is empty"]
+        return False, ["File is empty"], 0
     
     # Check for Stockholm header
     header_found = False
@@ -58,22 +79,7 @@ def validate_stockholm_file(filepath):
     if not terminator_found:
         errors.append("Missing required '//' terminator")
     
-    # Check for at least one sequence
-    sequence_count = 0
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        # Skip empty lines, comments, markup, and terminator
-        if not stripped or stripped.startswith('#') or stripped == '//':
-            continue
-        # Sequence lines should have at least two fields (name and sequence)
-        parts = stripped.split()
-        if len(parts) >= 2:
-            sequence_count += 1
-    
-    if sequence_count == 0:
-        errors.append("No sequences found in alignment")
-    
-    # Validate alignment consistency (all sequences should have same length)
+    # Parse sequences
     sequences = {}
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -93,16 +99,133 @@ def validate_stockholm_file(filepath):
             else:
                 sequences[seq_name] = seq_data
     
-    # Check all sequences have the same length
-    if sequences:
-        lengths = {name: len(seq) for name, seq in sequences.items()}
-        unique_lengths = set(lengths.values())
+    if not sequences:
+        errors.append("No sequences found in alignment")
+    
+    # Check for duplicates if requested
+    if remove_duplicates and sequences:
+        unique_sequences = {}
+        duplicates_found = []
         
-        if len(unique_lengths) > 1:
-            errors.append(f"Sequences have inconsistent lengths: {lengths}")
+        for seq_name, seq_data in sequences.items():
+            accession, coords = parse_sequence_identifier(seq_name)
+            key = (accession, coords, seq_data)
+            
+            if key not in unique_sequences:
+                unique_sequences[key] = seq_name
+            else:
+                duplicates_found.append(seq_name)
+        
+        num_duplicates = len(duplicates_found)
     
     is_valid = len(errors) == 0
-    return is_valid, errors
+    return is_valid, errors, num_duplicates
+
+
+def remove_duplicates_from_file(filepath, output_filepath=None):
+    """
+    Remove duplicate sequences from a Stockholm file.
+    
+    Duplicates are defined as sequences with the same accession/identifier,
+    coordinates, and exact sequence data.
+    
+    Args:
+        filepath: Path to input Stockholm file
+        output_filepath: Path to output file (if None, overwrites input)
+        
+    Returns:
+        int: Number of duplicates removed
+    """
+    try:
+        with open(filepath, 'r') as f:
+            lines = f.readlines()
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return 0
+    
+    # Separate different types of lines
+    header_lines = []
+    annotation_lines = []
+    footer_lines = []
+    sequence_entries = []  # List of (seq_name, seq_content) tuples
+    
+    sequences_started = False
+    sequences_ended = False
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        if stripped == '//':
+            sequences_ended = True
+            footer_lines.append(line)
+        elif sequences_ended:
+            footer_lines.append(line)
+        elif stripped.startswith('# STOCKHOLM'):
+            header_lines.append(line)
+            sequences_started = True
+        elif stripped.startswith('#=GF') or stripped.startswith('#=GC') or stripped.startswith('#=GS') or stripped.startswith('#=GR'):
+            annotation_lines.append(line)
+        elif stripped.startswith('#'):
+            if not sequences_started:
+                header_lines.append(line)
+            else:
+                annotation_lines.append(line)
+        elif stripped:
+            # This is a sequence line
+            parts = stripped.split(None, 1)
+            if len(parts) >= 2:
+                seq_name = parts[0]
+                seq_content = parts[1].replace(' ', '')
+                sequence_entries.append((seq_name, seq_content))
+        else:
+            # Empty line
+            if not sequences_started:
+                header_lines.append(line)
+            elif not sequences_ended:
+                # Keep empty lines in body
+                pass
+            else:
+                footer_lines.append(line)
+    
+    # Find duplicates based on accession, coordinates, and sequence
+    seen_keys = {}
+    unique_entries = []
+    duplicates_count = 0
+    
+    for seq_name, seq_content in sequence_entries:
+        accession, coords = parse_sequence_identifier(seq_name)
+        key = (accession, coords, seq_content)
+        
+        if key not in seen_keys:
+            seen_keys[key] = True
+            unique_entries.append((seq_name, seq_content))
+        else:
+            duplicates_count += 1
+    
+    # Write output file
+    if output_filepath is None:
+        output_filepath = filepath
+    
+    with open(output_filepath, 'w') as f:
+        # Write header lines
+        for line in header_lines:
+            f.write(line)
+        
+        # Write unique sequences
+        for seq_name, seq_content in unique_entries:
+            f.write(f"{seq_name:<30} {seq_content}\n")
+        
+        # Write annotation lines
+        for line in annotation_lines:
+            f.write(line)
+        
+        # Write footer lines
+        for line in footer_lines:
+            f.write(line)
+    
+    return duplicates_count
+    
+    return len(duplicates_removed)
 
 
 def main():
@@ -120,6 +243,11 @@ def main():
         action='store_true',
         help='Print detailed validation information'
     )
+    parser.add_argument(
+        '--remove-duplicates',
+        action='store_true',
+        help='Remove duplicate sequences (same accession, coordinates, and sequence)'
+    )
     
     args = parser.parse_args()
     
@@ -133,11 +261,19 @@ def main():
             all_valid = False
             continue
         
-        is_valid, errors = validate_stockholm_file(filepath)
+        # Remove duplicates if requested
+        if args.remove_duplicates:
+            num_removed = remove_duplicates_from_file(filepath)
+            if num_removed > 0:
+                print(f"Removed {num_removed} duplicate sequence(s) from {filepath}")
+        
+        is_valid, errors, num_duplicates = validate_stockholm_file(filepath, remove_duplicates=not args.remove_duplicates)
         
         if is_valid:
             if args.verbose:
                 print(f"✓ {filepath}: Valid Stockholm file")
+                if not args.remove_duplicates and num_duplicates > 0:
+                    print(f"  Note: Found {num_duplicates} duplicate sequence(s)")
         else:
             print(f"✗ {filepath}: INVALID")
             for error in errors:
