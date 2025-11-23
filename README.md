@@ -3,29 +3,44 @@ Tools for ensuring the quality of multiple sequence alignments (MSAs) in Rfam
 
 ## Stockholm File Validation
 
-This repository includes a validation script for Stockholm format alignment files (`.so`, `.sto`, `.stk`).
+This repository includes a modular validation script for Stockholm format alignment files (`.so`, `.sto`, `.stk`).
 
 ### Usage
 
 ```bash
-python3 validate_stockholm.py [-v] [--remove-duplicates] <file1.so> [file2.so ...]
+python3 validate_stockholm.py [-v] [--fix] [--output-mode {stdout,file}] <file1.so> [file2.so ...]
 ```
 
 Options:
 - `-v, --verbose`: Print detailed validation information
-- `--remove-duplicates`: Remove duplicate sequences from the file(s)
+- `--fix`: Attempt to fix fixable errors automatically
+- `--output-mode {stdout,file}`: Output mode for fixed files (default: file)
+  - `file`: Create a new file with `_corrected` suffix
+  - `stdout`: Print corrected content to stdout
 
 ### What is validated?
 
-The script checks for:
-- Required `# STOCKHOLM 1.0` header
-- Required `//` terminator
-- Presence of at least one sequence
+**Fatal Errors** (must be fixed manually):
+- Missing `# STOCKHOLM 1.0` header
+- Missing `//` terminator
+- No sequences found in alignment
+- **All sequences must have the same length**
+- **Sequences must not contain whitespace characters**
 
-The script also provides warnings for:
+**Fixable Errors** (can be auto-corrected with `--fix`):
+- Duplicate sequences (same accession, coordinates, and sequence data)
+
+**Warnings** (non-critical):
 - Missing 2D structure consensus annotation (`#=GC SS_cons`)
+- Lines exceeding 10,000 character limit
 
-Note: Sequences are allowed to have different lengths in the alignment.
+### Modular Architecture
+
+The validation logic is split into separate modules in the `scripts/` directory:
+- `fatal_errors.py`: Errors that cannot be automatically fixed
+- `fixable_errors.py`: Errors that can be automatically corrected
+- `warnings.py`: Non-critical issues
+- `parser.py`: Stockholm file parsing utilities
 
 ### Sequence Format
 
@@ -35,14 +50,18 @@ Sequences should follow the format: `ACCESSION/START-END` where:
 
 Example: `AF228364.1/1-74`
 
+Sequence data:
+- May contain any characters except whitespace
+- Gaps may be indicated by `.` or `-`
+
 ### Duplicate Detection and Removal
 
-The script can detect and remove duplicate sequences using the `--remove-duplicates` flag. Duplicates are defined as sequences that have:
+The script can detect and remove duplicate sequences using the `--fix` flag. Duplicates are defined as sequences that have:
 1. The same accession/identifier
 2. The same coordinates
 3. The exact same sequence data
 
-### Example
+### Examples
 
 ```bash
 # Validate a single file
@@ -51,8 +70,11 @@ python3 validate_stockholm.py example_valid.so
 # Validate multiple files with verbose output
 python3 validate_stockholm.py -v file1.so file2.so file3.so
 
-# Remove duplicates from a file
-python3 validate_stockholm.py --remove-duplicates file.so
+# Fix duplicate sequences and create corrected file
+python3 validate_stockholm.py --fix file.so
+
+# Fix and output to stdout
+python3 validate_stockholm.py --fix --output-mode stdout file.so
 ```
 
 ### Continuous Integration
