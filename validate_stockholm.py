@@ -54,61 +54,55 @@ def validate_stockholm_file(filepath, check_duplicates=False):
     if not lines:
         return False, ["File is empty"], 0, []
     
-    # Check for Stockholm header
+    # Check for required elements and parse sequences in single pass
     header_found = False
+    terminator_found = False
+    ss_cons_found = False
+    sequences = {}
+    
     for i, line in enumerate(lines):
-        if line.strip().startswith('# STOCKHOLM'):
+        stripped = line.strip()
+        
+        # Check for Stockholm header
+        if stripped.startswith('# STOCKHOLM'):
             header_found = True
             # Validate version (typically 1.0)
-            parts = line.strip().split()
+            parts = stripped.split()
             if len(parts) >= 3:
                 version = parts[2]
                 if version != '1.0':
                     errors.append(f"Line {i+1}: Non-standard Stockholm version '{version}' (expected 1.0)")
-            break
+        
+        # Check for terminator
+        elif stripped == '//':
+            terminator_found = True
+        
+        # Check for 2D structure consensus annotation
+        elif stripped.startswith('#=GC SS_cons'):
+            ss_cons_found = True
+        
+        # Parse sequence lines (skip empty, comments, markup, and terminator)
+        elif stripped and not stripped.startswith('#'):
+            parts = stripped.split(None, 1)  # Split on first whitespace only
+            if len(parts) >= 2:
+                seq_name = parts[0]
+                # Remove internal spaces - Stockholm format allows spaces in sequence data
+                seq_data = parts[1].replace(' ', '')
+                
+                if seq_name in sequences:
+                    # Append to existing sequence (Stockholm can have interleaved format)
+                    sequences[seq_name] += seq_data
+                else:
+                    sequences[seq_name] = seq_data
     
     if not header_found:
         errors.append("Missing required '# STOCKHOLM 1.0' header")
     
-    # Check for terminator
-    terminator_found = False
-    for i, line in enumerate(lines):
-        if line.strip() == '//':
-            terminator_found = True
-            break
-    
     if not terminator_found:
         errors.append("Missing required '//' terminator")
     
-    # Check for 2D structure consensus annotation
-    ss_cons_found = False
-    for line in lines:
-        if line.strip().startswith('#=GC SS_cons'):
-            ss_cons_found = True
-            break
-    
     if not ss_cons_found:
         warnings.append("Missing 2D structure consensus annotation (#=GC SS_cons)")
-    
-    # Parse sequences
-    sequences = {}
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        # Skip empty lines, comments, markup, and terminator
-        if not stripped or stripped.startswith('#') or stripped == '//':
-            continue
-        
-        parts = stripped.split(None, 1)  # Split on first whitespace only
-        if len(parts) >= 2:
-            seq_name = parts[0]
-            # Remove internal spaces - Stockholm format allows spaces in sequence data
-            seq_data = parts[1].replace(' ', '')
-            
-            if seq_name in sequences:
-                # Append to existing sequence (Stockholm can have interleaved format)
-                sequences[seq_name] += seq_data
-            else:
-                sequences[seq_name] = seq_data
     
     if not sequences:
         errors.append("No sequences found in alignment")
@@ -284,24 +278,21 @@ def main():
         is_valid, errors, num_duplicates, warnings = validate_stockholm_file(filepath, check_duplicates=not args.remove_duplicates)
         
         if is_valid:
-            if args.verbose:
+            # Print success message if verbose or if there are warnings
+            if args.verbose or warnings:
                 print(f"✓ {filepath}: Valid Stockholm file")
-                if not args.remove_duplicates and num_duplicates > 0:
+                if args.verbose and not args.remove_duplicates and num_duplicates > 0:
                     print(f"  Note: Found {num_duplicates} duplicate sequence(s)")
-            # Display warnings even if file is valid
-            if warnings:
-                if not args.verbose:
-                    print(f"✓ {filepath}: Valid Stockholm file")
-                for warning in warnings:
-                    print(f"  ⚠ Warning: {warning}")
+            # Display warnings
+            for warning in warnings:
+                print(f"  ⚠ Warning: {warning}")
         else:
             print(f"✗ {filepath}: INVALID")
             for error in errors:
                 print(f"  - {error}")
             # Display warnings even if there are errors
-            if warnings:
-                for warning in warnings:
-                    print(f"  ⚠ Warning: {warning}")
+            for warning in warnings:
+                print(f"  ⚠ Warning: {warning}")
             all_valid = False
     
     if all_valid:
