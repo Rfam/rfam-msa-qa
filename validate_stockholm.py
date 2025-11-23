@@ -39,19 +39,20 @@ def validate_stockholm_file(filepath, check_duplicates=False):
         check_duplicates: If True, count duplicate sequences
         
     Returns:
-        tuple: (bool, list, int) - (is_valid, list_of_errors, num_duplicates_found)
+        tuple: (bool, list, int, list) - (is_valid, list_of_errors, num_duplicates_found, list_of_warnings)
     """
     errors = []
+    warnings = []
     num_duplicates = 0
     
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
     except Exception as e:
-        return False, [f"Failed to read file: {e}"], 0
+        return False, [f"Failed to read file: {e}"], 0, []
     
     if not lines:
-        return False, ["File is empty"], 0
+        return False, ["File is empty"], 0, []
     
     # Check for Stockholm header
     header_found = False
@@ -78,6 +79,16 @@ def validate_stockholm_file(filepath, check_duplicates=False):
     
     if not terminator_found:
         errors.append("Missing required '//' terminator")
+    
+    # Check for 2D structure consensus annotation
+    ss_cons_found = False
+    for line in lines:
+        if line.strip().startswith('#=GC SS_cons'):
+            ss_cons_found = True
+            break
+    
+    if not ss_cons_found:
+        warnings.append("Missing 2D structure consensus annotation (#=GC SS_cons)")
     
     # Parse sequences
     sequences = {}
@@ -119,7 +130,7 @@ def validate_stockholm_file(filepath, check_duplicates=False):
         num_duplicates = len(duplicates_found)
     
     is_valid = len(errors) == 0
-    return is_valid, errors, num_duplicates
+    return is_valid, errors, num_duplicates, warnings
 
 
 def remove_duplicates_from_file(filepath, output_filepath=None):
@@ -270,17 +281,27 @@ def main():
             if num_removed > 0:
                 print(f"Removed {num_removed} duplicate sequence(s) from {filepath}")
         
-        is_valid, errors, num_duplicates = validate_stockholm_file(filepath, check_duplicates=not args.remove_duplicates)
+        is_valid, errors, num_duplicates, warnings = validate_stockholm_file(filepath, check_duplicates=not args.remove_duplicates)
         
         if is_valid:
             if args.verbose:
                 print(f"✓ {filepath}: Valid Stockholm file")
                 if not args.remove_duplicates and num_duplicates > 0:
                     print(f"  Note: Found {num_duplicates} duplicate sequence(s)")
+            # Display warnings even if file is valid
+            if warnings:
+                if not args.verbose:
+                    print(f"✓ {filepath}: Valid Stockholm file")
+                for warning in warnings:
+                    print(f"  ⚠ Warning: {warning}")
         else:
             print(f"✗ {filepath}: INVALID")
             for error in errors:
                 print(f"  - {error}")
+            # Display warnings even if there are errors
+            if warnings:
+                for warning in warnings:
+                    print(f"  ⚠ Warning: {warning}")
             all_valid = False
     
     if all_valid:

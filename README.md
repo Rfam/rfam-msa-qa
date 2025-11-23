@@ -22,6 +22,9 @@ The script checks for:
 - Required `//` terminator
 - Presence of at least one sequence
 
+The script also provides warnings for:
+- Missing 2D structure consensus annotation (`#=GC SS_cons`)
+
 Note: Sequences are allowed to have different lengths in the alignment.
 
 ### Sequence Format
@@ -66,7 +69,10 @@ Stockholm format is used for multiple sequence alignments. Basic structure:
 # STOCKHOLM 1.0
 AF228364.1/1-74    CGGCAGAUGAUGAU-UUUACUUGGAUUCCCCUUCAGAACAUUUA
 AF228365.1/1-73    CGGCAGAUGAUGAU-UUUACUUGGAUUCCCCUUCAGAACAUUU
+#=GC SS_cons       <<<<_______..________.__._.______.___.___.___
 //
 ```
+
+The `#=GC SS_cons` line is the 2D structure consensus annotation, which represents the secondary structure of the RNA alignment. While not strictly required, it is recommended for Rfam alignments.
 
 For more information, see the [Stockholm format specification](https://en.wikipedia.org/wiki/Stockholm_format).
