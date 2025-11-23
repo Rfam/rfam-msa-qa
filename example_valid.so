@@ -3,8 +3,8 @@
 #=GF AC    RF00000
 #=GF DE    Example multiple sequence alignment
 
-seq1    ACGU-ACGU-ACGU
-seq2    ACGU-ACGU-ACGU
-seq3    ACGU-ACGU-ACGU
-seq4    ACGU-ACGU-ACGU
+AF228364.1/1-14              ACGU-ACGU-ACGU
+AF228365.1/1-14              ACGU-ACGU-ACGU
+AF228366.1/1-14              ACGU-ACGU-ACGU
+AF228367.1/1-14              ACGU-ACGU-ACGU
 //
