@@ -1,5 +1,5 @@
 # rfam-msa-qa
-Tools for ensuring the quality of multiple sequence alignments (MSAs) in Rfam
+Tools for ensuring the quality of multiple sequence alignments (MSAs) in Rfam.
 
 ## Stockholm File Validation
 
@@ -114,3 +114,7 @@ AF228365.1/1-73    CGGCAGAUGAUGAU-UUUACUUGGAUUCCCCUUCAGAACAUUU
 The `#=GC SS_cons` line is the 2D structure consensus annotation, which represents the secondary structure of the RNA alignment. While not strictly required, it is recommended for Rfam alignments.
 
 For more information, see the [Stockholm format specification](https://en.wikipedia.org/wiki/Stockholm_format).
+
+## Contact us
+
+If you have any questions or feedback, feel free to submit a GitHub issue or [email us](https://docs.rfam.org/en/latest/).
