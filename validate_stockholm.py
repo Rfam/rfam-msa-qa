@@ -12,7 +12,7 @@ import argparse
 from pathlib import Path
 
 # Import validation modules
-from scripts import fatal_errors, fixable_errors, warnings, parser
+from scripts import fatal_errors, fixable_errors, stockholm_warnings as warnings, parser
 
 
 def validate_stockholm_file(filepath):
@@ -86,7 +86,17 @@ def validate_stockholm_file(filepath):
     # Check for fixable errors
     if len(duplicates) > 0:
         fixable_error_list.append(f"Found {len(duplicates)} duplicate sequence(s)")
-    
+
+    # Check for missing coordinates
+    missing_coords = fixable_errors.find_missing_coordinates(sequence_entries)
+    if missing_coords:
+        fixable_error_list.append(f"Found {len(missing_coords)} sequence(s) missing coordinates")
+
+    # Check for overlapping sequences
+    overlapping = fixable_errors.find_overlapping_sequences(sequence_entries)
+    if overlapping:
+        fixable_error_list.append(f"Found {len(overlapping)} overlapping sequence(s)")
+
     # Check for warnings
     has_warning, warning_msg = warnings.check_ss_cons(lines)
     if has_warning:
@@ -109,41 +119,179 @@ def validate_stockholm_file(filepath):
     }
 
 
-def fix_file(filepath, output_mode='file'):
+def fix_file(filepath, output_mode='file', verbose=False):
     """
     Fix fixable errors in a Stockholm file.
-    
+
     Args:
         filepath: Path to input Stockholm file
         output_mode: 'stdout' to print to stdout, 'file' to create _corrected file
-        
+        verbose: Print progress messages
+
     Returns:
         tuple: (success, num_fixes_applied, output_path)
     """
+    import re
+
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
     except Exception as e:
         print(f"Error reading file: {e}", file=sys.stderr)
         return False, 0, None
-    
-    # Apply fixes (currently only duplicate removal)
-    corrected_lines, num_duplicates = fixable_errors.remove_duplicates(lines)
-    
+
+    # Parse to check for missing coordinates
+    parsed = parser.parse_stockholm_file(lines)
+    sequence_entries = parsed['sequence_entries']
+    missing_coords = fixable_errors.find_missing_coordinates(sequence_entries)
+
+    num_fixes = 0
+    id_mapping = {}
+    to_remove = set()
+
+    # Fix missing coordinates if any
+    if missing_coords:
+        if verbose:
+            print(f"  Fixing {len(missing_coords)} missing coordinates (downloading from NCBI)...")
+        id_mapping, to_remove = fixable_errors.fix_missing_coordinates(filepath, verbose=verbose)
+        # Count sequences that got new coordinates (where key != value)
+        num_coords_fixed = len([k for k, v in id_mapping.items() if k != v])
+        num_fixes += num_coords_fixed
+        if verbose and to_remove:
+            print(f"  {len(to_remove)} sequence(s) will be removed (no accurate match)")
+
+    # Apply coordinate fixes, remove bad sequences, and remove duplicates
+    header_lines = []
+    gf_lines = []  # #=GF lines go at top after header
+    gs_gr_lines = []  # #=GS/#=GR lines (sequence annotations)
+    gc_lines = []  # #=GC lines go at bottom before //
+    footer_lines = []
+    processed_sequences = []  # List of (new_name, seq_content)
+    seen_sequences = {}
+    num_duplicates = 0
+    num_removed = 0
+    in_footer = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped == '//':
+            in_footer = True
+            footer_lines.append(line)
+        elif in_footer:
+            footer_lines.append(line)
+        elif stripped.startswith('# STOCKHOLM'):
+            header_lines.append(line)
+        elif stripped.startswith('#=GF'):
+            # File-level annotations - keep at top
+            gf_lines.append(line)
+        elif stripped.startswith('#=GC'):
+            # Column-level annotations - keep at bottom
+            gc_lines.append(line)
+        elif stripped.startswith('#=GS') or stripped.startswith('#=GR'):
+            # Sequence-level annotations - update accession if needed
+            parts = re.split(r'\s+', stripped)
+            if len(parts) >= 3:
+                seq_id = parts[1]
+                # Skip annotation for removed sequences
+                if seq_id in to_remove:
+                    continue
+                # Update accession if mapped
+                if seq_id in id_mapping:
+                    parts[1] = id_mapping[seq_id]
+                    info = ' '.join(parts[:-1])
+                    gs_gr_lines.append((seq_id, f"{info:<30} {parts[-1]}\n"))
+                else:
+                    gs_gr_lines.append((seq_id, line))
+            else:
+                gs_gr_lines.append((None, line))
+        elif stripped.startswith('#') or line == "\n":
+            # Other comments or blank lines - keep at top
+            header_lines.append(line)
+        elif stripped:
+            # Sequence line
+            parts = stripped.split(None, 1)
+            if len(parts) >= 2:
+                seq_name = parts[0]
+                seq_content = parts[1].replace(' ', '')
+
+                # Skip sequences marked for removal
+                if seq_name in to_remove:
+                    num_removed += 1
+                    continue
+
+                # Apply coordinate mapping if available
+                if seq_name in id_mapping:
+                    new_name = id_mapping[seq_name]
+                else:
+                    new_name = seq_name
+
+                # Check for duplicates
+                accession, coords = fixable_errors.parse_sequence_identifier(new_name)
+                key = (accession, coords, seq_content)
+
+                if key not in seen_sequences:
+                    seen_sequences[key] = True
+                    processed_sequences.append((new_name, seq_content))
+                else:
+                    num_duplicates += 1
+
+    num_fixes += num_duplicates
+
+    # Check for overlapping sequences and remove them
+    overlapping = fixable_errors.find_overlapping_sequences(processed_sequences)
+    if overlapping:
+        if verbose:
+            print(f"  Found {len(overlapping)} overlapping sequence(s) to remove")
+        # Filter out overlapping sequences
+        processed_sequences = [(name, seq) for name, seq in processed_sequences if name not in overlapping]
+        num_removed += len(overlapping)
+
+    # Build final corrected lines in proper Stockholm order
+    corrected_lines = []
+
+    # 1. Header (# STOCKHOLM 1.0)
+    corrected_lines.extend(header_lines)
+
+    # 2. File-level annotations (#=GF) - keep at top
+    corrected_lines.extend(gf_lines)
+
+    # 3. Sequence-level annotations (#=GS) for kept sequences
+    kept_seq_names = {name for name, _ in processed_sequences}
+    for orig_seq_id, ann_line in gs_gr_lines:
+        if orig_seq_id is None:
+            corrected_lines.append(ann_line)
+        elif orig_seq_id in id_mapping:
+            mapped_name = id_mapping[orig_seq_id]
+            if mapped_name in kept_seq_names:
+                corrected_lines.append(ann_line)
+        elif orig_seq_id in kept_seq_names:
+            corrected_lines.append(ann_line)
+
+    # 4. Sequences
+    for new_name, seq_content in processed_sequences:
+        corrected_lines.append(f"{new_name:<30} {seq_content}\n")
+
+    # 5. Column-level annotations (#=GC) - after sequences
+    corrected_lines.extend(gc_lines)
+
+    corrected_lines.extend(footer_lines)
+
+    if verbose and num_removed > 0:
+        print(f"  Removed {num_removed} sequence(s) total from output")
+
     if output_mode == 'stdout':
-        # Print to stdout
         for line in corrected_lines:
             print(line, end='')
-        return True, num_duplicates, None
+        return True, num_fixes, None
     else:
-        # Create _corrected file
         path = Path(filepath)
         output_path = path.parent / f"{path.stem}_corrected{path.suffix}"
-        
+
         with open(output_path, 'w') as f:
             f.writelines(corrected_lines)
-        
-        return True, num_duplicates, str(output_path)
+
+        return True, num_fixes, str(output_path)
 
 
 def main():
@@ -190,7 +338,7 @@ def main():
         
         # Handle fixing if requested
         if args.fix and result['can_be_fixed']:
-            success, num_fixes, output_path = fix_file(filepath, args.output_mode)
+            success, num_fixes, output_path = fix_file(filepath, args.output_mode, verbose=args.verbose)
             if success:
                 if args.output_mode == 'file':
                     print(f"✓ Fixed {num_fixes} issue(s) in {filepath}")
