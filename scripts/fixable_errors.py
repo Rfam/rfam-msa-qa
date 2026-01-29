@@ -7,6 +7,14 @@ These errors can be automatically corrected.
 import os
 import time
 import re
+import warnings
+
+# Suppress BioPython warnings
+warnings.filterwarnings("ignore", module="Bio")
+warnings.filterwarnings("ignore", message=".*FASTA.*")
+
+# Import configuration
+from scripts import config
 
 
 def parse_sequence_identifier(seq_name):
@@ -54,7 +62,7 @@ def get_fasta_file(identifier):
     os.makedirs(fasta_folder, exist_ok=True)
     fasta_file = os.path.join(fasta_folder, identifier + '.fasta')
     if not os.path.exists(fasta_file) or os.stat(fasta_file).st_size == 0:
-        time.sleep(0.5)  # Rate limit NCBI requests
+        time.sleep(config.NCBI_REQUEST_DELAY)  # Rate limit NCBI requests
         import subprocess
         url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id={identifier}&rettype=fasta&retmode=text"
         subprocess.run(['curl', '-s', '-o', fasta_file, url], check=True)
@@ -72,22 +80,30 @@ def get_accession_version(fasta_file):
     return '.1'
 
 
-def blast_search(sequence, verbose=False, min_identity=95, min_coverage=90, max_evalue=1e-10):
+def blast_search(sequence, verbose=False, min_identity=None, min_coverage=None, max_evalue=None):
     """
     Perform BLAST search for a sequence that couldn't be found directly.
 
     Args:
         sequence: DNA/RNA sequence string (without gaps)
         verbose: Print progress
-        min_identity: Minimum identity percentage to accept (default 95%)
-        min_coverage: Minimum query coverage percentage (default 90%)
-        max_evalue: Maximum e-value to accept (default 1e-10)
+        min_identity: Minimum identity percentage (default from config)
+        min_coverage: Minimum query coverage percentage (default from config)
+        max_evalue: Maximum e-value to accept (default from config)
 
     Returns:
         tuple: (accession_with_coords, is_accurate) or (None, False) if no good hit
     """
     from Bio.Blast import NCBIWWW, NCBIXML
     from Bio.Seq import Seq
+
+    # Use config defaults if not specified
+    if min_identity is None:
+        min_identity = config.BLAST_MIN_IDENTITY
+    if min_coverage is None:
+        min_coverage = config.BLAST_MIN_COVERAGE
+    if max_evalue is None:
+        max_evalue = config.BLAST_MAX_EVALUE
 
     # Convert RNA to DNA for BLAST
     dna_seq = str(Seq(sequence).back_transcribe())
@@ -99,7 +115,7 @@ def blast_search(sequence, verbose=False, min_identity=95, min_coverage=90, max_
         # Use blastn against nt database, limit results for speed
         result_handle = NCBIWWW.qblast(
             "blastn", "nt", dna_seq,
-            hitlist_size=5,
+            hitlist_size=config.BLAST_HITLIST_SIZE,
             expect=max_evalue,
             format_type="XML"
         )
@@ -299,6 +315,85 @@ def find_overlapping_sequences(sequence_entries):
                 to_remove.add(seq_name)
 
     return to_remove
+
+
+def validate_sequences_against_ncbi(sequence_entries, verbose=False):
+    """
+    Validate that sequences match their NCBI source at the given coordinates.
+
+    Args:
+        sequence_entries: List of (seq_name, seq_data) tuples
+        verbose: Print progress messages
+
+    Returns:
+        tuple: (invalid set, not_found set, mismatched set)
+            - invalid: all sequences that failed validation (union of not_found and mismatched)
+            - not_found: sequences where accession wasn't found in NCBI
+            - mismatched: sequences where data doesn't match NCBI
+    """
+    from Bio import SeqIO
+    from Bio.Seq import Seq
+
+    not_found = set()
+    mismatched = set()
+
+    for seq_name, seq_data in sequence_entries:
+        accession, coords = parse_sequence_identifier(seq_name)
+
+        if not coords:
+            # No coordinates, can't validate
+            continue
+
+        # Parse coordinates
+        match = re.match(r'(\d+)-(\d+)', coords)
+        if not match:
+            continue
+
+        start, end = int(match.group(1)), int(match.group(2))
+
+        # Get FASTA file
+        try:
+            fasta_file = get_fasta_file(accession)
+            fasta = SeqIO.read(fasta_file, "fasta")
+        except Exception as e:
+            if verbose:
+                print(f"  {seq_name}: accession NOT FOUND in NCBI ({e})")
+            not_found.add(seq_name)
+            continue
+
+        # Extract subsequence from NCBI (handle forward and reverse strand)
+        # Convert to 0-based indexing
+        if start < end:
+            # Forward strand
+            ncbi_subseq = str(fasta.seq[start - 1:end]).upper()
+        else:
+            # Reverse strand
+            ncbi_subseq = str(fasta.seq[end - 1:start].reverse_complement()).upper()
+
+        # Remove gaps from Stockholm sequence for comparison
+        stockholm_seq = seq_data.replace('.', '').replace('-', '').upper()
+
+        # Convert RNA to DNA for comparison (NCBI stores DNA)
+        stockholm_seq_dna = str(Seq(stockholm_seq).back_transcribe())
+
+        # Compare
+        if stockholm_seq_dna != ncbi_subseq:
+            if verbose:
+                print(f"  {seq_name}: MISMATCH with NCBI")
+                if len(stockholm_seq_dna) != len(ncbi_subseq):
+                    print(f"    Length: Stockholm={len(stockholm_seq_dna)}, NCBI={len(ncbi_subseq)}")
+                else:
+                    # Show first difference
+                    for i, (a, b) in enumerate(zip(stockholm_seq_dna, ncbi_subseq)):
+                        if a != b:
+                            print(f"    First difference at position {i+1}: Stockholm={a}, NCBI={b}")
+                            break
+            mismatched.add(seq_name)
+        elif verbose:
+            print(f"  {seq_name}: validated OK")
+
+    invalid = not_found | mismatched
+    return invalid, not_found, mismatched
 
 
 def find_duplicates_from_entries(sequence_entries):
