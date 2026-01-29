@@ -29,6 +29,8 @@ Options:
 
 **Fixable Errors** (can be auto-corrected with `--fix`):
 - Duplicate sequences (same accession, coordinates, and sequence data)
+- Missing coordinates (sequences without start/end positions)
+- Overlapping sequences (sequences from the same accession that overlap by ≥1 bp)
 
 **Warnings** (non-critical):
 - Missing 2D structure consensus annotation (`#=GC SS_cons`)
@@ -38,8 +40,8 @@ Options:
 
 The validation logic is split into separate modules in the `scripts/` directory:
 - `fatal_errors.py`: Errors that cannot be automatically fixed
-- `fixable_errors.py`: Errors that can be automatically corrected
-- `warnings.py`: Non-critical issues
+- `fixable_errors.py`: Errors that can be automatically corrected (including coordinate fixing and overlap removal)
+- `stockholm_warnings.py`: Non-critical issues
 - `parser.py`: Stockholm file parsing utilities
 
 ### Sequence Format
@@ -60,6 +62,20 @@ The script can detect and remove duplicate sequences using the `--fix` flag. Dup
 1. The same accession/identifier
 2. The same coordinates
 3. The exact same sequence data
+
+### Coordinate Fixing
+
+When sequences are missing coordinates (e.g., `NZ_CP038662.1` instead of `NZ_CP038662.1/4723652-4723704`), the `--fix` flag will:
+
+1. **NCBI Direct Lookup**: Download the FASTA sequence from NCBI and find coordinates by matching the alignment sequence
+2. **BLAST Fallback**: If direct lookup fails, perform a BLAST search against NCBI's nucleotide database (accepts hits with ≥95% identity, ≥90% coverage, e-value ≤1e-10)
+3. **Removal**: Sequences that cannot be resolved via either method are removed from the output
+
+**Requirements**: BioPython (`pip install biopython`)
+
+### Overlap Detection and Removal
+
+Sequences from the same accession (species) that overlap by at least 1 bp are detected. When using `--fix`, overlapping sequences are removed using greedy interval scheduling to keep the maximum number of non-overlapping sequences.
 
 ### Examples
 
