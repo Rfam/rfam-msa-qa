@@ -7,6 +7,10 @@ by checking for required structural elements and basic formatting.
 It can automatically fix certain errors like duplicate sequences.
 """
 
+# Suppress BioPython warnings before any imports
+import warnings as stdlib_warnings
+stdlib_warnings.filterwarnings("ignore", module="Bio")
+
 import sys
 import argparse
 from pathlib import Path
@@ -247,6 +251,18 @@ def fix_file(filepath, output_mode='file', verbose=False):
         processed_sequences = [(name, seq) for name, seq in processed_sequences if name not in overlapping]
         num_removed += len(overlapping)
 
+    # Validate sequences against NCBI
+    if verbose:
+        print(f"  Validating {len(processed_sequences)} sequence(s) against NCBI...")
+    invalid_seqs, not_found_seqs, mismatched_seqs = fixable_errors.validate_sequences_against_ncbi(processed_sequences, verbose=verbose)
+    if invalid_seqs:
+        if not_found_seqs:
+            print(f"  {len(not_found_seqs)} sequence(s) not found in NCBI (invalid accession?)")
+        if mismatched_seqs:
+            print(f"  {len(mismatched_seqs)} sequence(s) don't match NCBI data")
+        processed_sequences = [(name, seq) for name, seq in processed_sequences if name not in invalid_seqs]
+        num_removed += len(invalid_seqs)
+
     # Build final corrected lines in proper Stockholm order
     corrected_lines = []
 
@@ -336,8 +352,8 @@ def main():
         # Validate the file
         result = validate_stockholm_file(filepath)
         
-        # Handle fixing if requested
-        if args.fix and result['can_be_fixed']:
+        # Handle fixing if requested (always run to validate sequences against NCBI)
+        if args.fix and result['is_valid']:
             success, num_fixes, output_path = fix_file(filepath, args.output_mode, verbose=args.verbose)
             if success:
                 if args.output_mode == 'file':
