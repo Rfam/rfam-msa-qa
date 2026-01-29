@@ -77,6 +77,18 @@ When sequences are missing coordinates (e.g., `NZ_CP038662.1` instead of `NZ_CP0
 
 Sequences from the same accession (species) that overlap by at least 1 bp are detected. When using `--fix`, overlapping sequences are removed using greedy interval scheduling to keep the maximum number of non-overlapping sequences.
 
+### Sequence Validation
+
+When using `--fix`, all sequences are validated against NCBI to ensure they match the source data at the given coordinates. Sequences that don't match are removed.
+
+### Configuration
+
+Parameters can be adjusted in `scripts/config.py`:
+- `BLAST_MIN_IDENTITY`: Minimum identity % for BLAST hits (default: 95)
+- `BLAST_MIN_COVERAGE`: Minimum coverage % for BLAST hits (default: 90)
+- `BLAST_MAX_EVALUE`: Maximum e-value for BLAST hits (default: 1e-10)
+- `NCBI_REQUEST_DELAY`: Delay between NCBI requests in seconds (default: 0.5)
+
 ### Examples
 
 ```bash
