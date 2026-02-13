@@ -1,3 +1,6 @@
+
+Note: Where possible, biocurators should provide sequences with accession and coordinates in the format ACCESSION/START-END (e.g., NC_000943/10656-10721) as they appear in the source seed alignment. This avoids unnecessary NCBI lookups and BLAST searches during validation.
+
 When running validate_stockholm.py --fix, the script performs these steps in order:                                                                                       
                                                                                                                                                                             
   1. Parse Stockholm file - Read and parse the input file structure                                                                                                         
@@ -7,11 +10,13 @@ When running validate_stockholm.py --fix, the script performs these steps in ord
     - Mark for removal: Sequences that fail both methods                                                                                                                    
   3. Remove duplicates - Remove sequences with identical accession, coordinates, and sequence data                                                                          
   4. Remove overlapping sequences - For sequences from the same accession that overlap by ≥1 bp, use greedy interval scheduling to keep maximum non-overlapping set         
-  5. Validate against NCBI - For all remaining sequences:                                                                                                                   
-    - Fetch FASTA from NCBI using accession                                                                                                                                 
-    - Extract subsequence at given coordinates                                                                                                                              
-    - Compare with Stockholm sequence (gaps removed, RNA→DNA converted)                                                                                                     
-    - Remove sequences that don't match or have invalid accessions                                                                                                          
+  5. Validate against NCBI (with BLAST fallback) - For all remaining sequences:
+    - Fetch FASTA from NCBI using accession
+    - Extract subsequence at given coordinates
+    - Compare with Stockholm sequence (gaps removed, RNA→DNA converted)
+    - If accession not found or sequence mismatches: run BLAST search as fallback
+    - If BLAST finds a hit (≥95% identity, ≥90% coverage, e-value ≤1e-10): update accession/coordinates
+    - Remove sequences that fail both NCBI validation and BLAST                                                                                                          
   6. Write output - Save corrected file with proper Stockholm format order:                                                                                                 
     - # STOCKHOLM 1.0 header                                                                                                                                                
     - #=GF annotations (file-level)                                                                                                                                         

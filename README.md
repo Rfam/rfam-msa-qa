@@ -79,7 +79,11 @@ Sequences from the same accession (species) that overlap by at least 1 bp are de
 
 ### Sequence Validation
 
-When using `--fix`, all sequences are validated against NCBI to ensure they match the source data at the given coordinates. Sequences that don't match are removed.
+When using `--fix`, all sequences are validated against NCBI to ensure they match the source data at the given coordinates:
+
+1. **NCBI Validation**: Fetches the source sequence from NCBI and compares it against the Stockholm sequence at the given coordinates
+2. **BLAST Fallback**: If the accession is not found in NCBI or the sequence doesn't match, a BLAST search is performed to find the correct accession and coordinates
+3. **Removal**: Sequences that fail both NCBI validation and BLAST are removed from the output
 
 ### Configuration
 
