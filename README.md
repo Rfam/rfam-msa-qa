@@ -8,7 +8,7 @@ This repository includes a modular validation script for Stockholm format alignm
 ### Usage
 
 ```bash
-python3 validate_stockholm.py [-v] [--fix] [--output-mode {stdout,file}] <file1.so> [file2.so ...]
+python3 validate_stockholm.py [-v] [--fix] [--output-mode {stdout,file}] [--cm-db Rfam.cm] <file1.so> [file2.so ...]
 ```
 
 Options:
@@ -17,6 +17,7 @@ Options:
 - `--output-mode {stdout,file}`: Output mode for fixed files (default: file)
   - `file`: Create a new file with `_corrected` suffix
   - `stdout`: Print corrected content to stdout
+- `--cm-db <path>`: Path to Rfam CM database for filtering sequences matching known Rfam families (optional)
 
 ### What is validated?
 
@@ -30,7 +31,8 @@ Options:
 **Fixable Errors** (can be auto-corrected with `--fix`):
 - Duplicate sequences (same accession, coordinates, and sequence data)
 - Missing coordinates (sequences without start/end positions)
-- Overlapping sequences (sequences from the same accession that overlap by ≥1 bp)
+- Overlapping sequences (sequences from the same accession that overlap by >=1 bp)
+- Sequences matching known Rfam families (when `--cm-db` is provided)
 
 **Warnings** (non-critical):
 - Missing 2D structure consensus annotation (`#=GC SS_cons`)
@@ -40,9 +42,11 @@ Options:
 
 The validation logic is split into separate modules in the `scripts/` directory:
 - `fatal_errors.py`: Errors that cannot be automatically fixed
-- `fixable_errors.py`: Errors that can be automatically corrected (including coordinate fixing and overlap removal)
+- `fixable_errors.py`: Errors that can be automatically corrected (including coordinate fixing, overlap removal, and BLAST fallback)
 - `stockholm_warnings.py`: Non-critical issues
 - `parser.py`: Stockholm file parsing utilities
+- `alignment_stats.py`: Pairwise identity computation for alignment quality assessment
+- `config.py`: Configurable parameters (BLAST thresholds, cmscan E-value, NCBI request delay)
 
 ### Sequence Format
 
@@ -68,7 +72,7 @@ The script can detect and remove duplicate sequences using the `--fix` flag. Dup
 When sequences are missing coordinates (e.g., `NZ_CP038662.1` instead of `NZ_CP038662.1/4723652-4723704`), the `--fix` flag will:
 
 1. **NCBI Direct Lookup**: Download the FASTA sequence from NCBI and find coordinates by matching the alignment sequence
-2. **BLAST Fallback**: If direct lookup fails, perform a BLAST search against NCBI's nucleotide database (accepts hits with ≥95% identity, ≥90% coverage, e-value ≤1e-10)
+2. **BLAST Fallback**: If direct lookup fails, perform a BLAST search against NCBI's nucleotide database (accepts hits with >=95% identity, >=90% coverage, e-value <=1e-10)
 3. **Removal**: Sequences that cannot be resolved via either method are removed from the output
 
 **Requirements**: BioPython (`pip install biopython`)
@@ -85,13 +89,42 @@ When using `--fix`, all sequences are validated against NCBI to ensure they matc
 2. **BLAST Fallback**: If the accession is not found in NCBI or the sequence doesn't match, a BLAST search is performed to find the correct accession and coordinates
 3. **Removal**: Sequences that fail both NCBI validation and BLAST are removed from the output
 
+### Filtering Known Rfam Families (cmscan)
+
+When building a new Rfam family, you can filter out sequences that already belong to existing Rfam families using the `--cm-db` option. This requires:
+
+1. **Download Rfam.cm** from https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz
+2. **Decompress**: `gunzip Rfam.cm.gz`
+3. **Press the database**: `cmpress Rfam.cm` (generates `.i1f`, `.i1i`, `.i1m`, `.i1p` index files)
+4. **Install Infernal**: `cmscan` must be available in your PATH (http://eddylab.org/infernal/)
+
+Only sequences with significant cmscan hits (E-value <= 1e-3 by default) are removed. Weak or spurious hits are kept. The E-value threshold is configurable via `CMSCAN_MAX_EVALUE` in `scripts/config.py`.
+
+```bash
+# Filter known families during fixing
+python3 validate_stockholm.py -v --fix --cm-db Rfam.cm input.sto
+```
+
+### Pairwise Identity
+
+When running with `--fix -v`, the script computes and displays the average pairwise identity for each sequence in the final alignment. Sequences with identity significantly below the alignment average (>20 percentage points) are flagged as potential outliers.
+
+### Report Output
+
+When using `--fix` in file output mode, a report file (`<stem>_Report.txt`) is generated alongside the corrected alignment, capturing the full verbose output of the validation and fixing process.
+
 ### Configuration
 
 Parameters can be adjusted in `scripts/config.py`:
-- `BLAST_MIN_IDENTITY`: Minimum identity % for BLAST hits (default: 95)
-- `BLAST_MIN_COVERAGE`: Minimum coverage % for BLAST hits (default: 90)
-- `BLAST_MAX_EVALUE`: Maximum e-value for BLAST hits (default: 1e-10)
-- `NCBI_REQUEST_DELAY`: Delay between NCBI requests in seconds (default: 0.5)
+
+| Parameter | Default | Description |
+|---|---|---|
+| `BLAST_MIN_IDENTITY` | 95 | Minimum identity % for BLAST hits |
+| `BLAST_MIN_COVERAGE` | 90 | Minimum coverage % for BLAST hits |
+| `BLAST_MAX_EVALUE` | 1e-10 | Maximum e-value for BLAST hits |
+| `BLAST_HITLIST_SIZE` | 5 | Number of BLAST hits to retrieve |
+| `CMSCAN_MAX_EVALUE` | 1e-3 | Maximum e-value for cmscan hits (known family filtering) |
+| `NCBI_REQUEST_DELAY` | 0.5 | Delay between NCBI requests in seconds |
 
 ### Examples
 
@@ -102,11 +135,14 @@ python3 validate_stockholm.py example_valid.so
 # Validate multiple files with verbose output
 python3 validate_stockholm.py -v file1.so file2.so file3.so
 
-# Fix duplicate sequences and create corrected file
+# Fix errors and create corrected file
 python3 validate_stockholm.py --fix file.so
 
 # Fix and output to stdout
 python3 validate_stockholm.py --fix --output-mode stdout file.so
+
+# Fix with known Rfam family filtering
+python3 validate_stockholm.py -v --fix --cm-db Rfam.cm file.sto
 ```
 
 ### Continuous Integration

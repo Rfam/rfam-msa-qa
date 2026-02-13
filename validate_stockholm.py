@@ -248,10 +248,6 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
     """
     import re
 
-    # Resolve CM database for filtering known families
-    if cm_db is None:
-        cm_db = find_cm_db(filepath)
-
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
@@ -278,7 +274,8 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
     if missing_coords:
         if verbose:
             print(f"  Fixing {len(missing_coords)} missing coordinates (downloading from NCBI)...")
-        id_mapping, to_remove = fixable_errors.fix_missing_coordinates(filepath, verbose=verbose)
+        id_mapping, coords_to_remove = fixable_errors.fix_missing_coordinates(filepath, verbose=verbose)
+        to_remove.update(coords_to_remove)
         # Count sequences that got new coordinates (where key != value)
         num_coords_fixed = len([k for k, v in id_mapping.items() if k != v])
         num_fixes += num_coords_fixed
