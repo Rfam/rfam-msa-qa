@@ -317,25 +317,30 @@ def find_overlapping_sequences(sequence_entries):
     return to_remove
 
 
-def validate_sequences_against_ncbi(sequence_entries, verbose=False):
+def validate_sequences_against_ncbi(sequence_entries, verbose=False, use_blast_fallback=True):
     """
     Validate that sequences match their NCBI source at the given coordinates.
+    When validation fails, optionally falls back to BLAST to find the correct
+    accession and coordinates.
 
     Args:
         sequence_entries: List of (seq_name, seq_data) tuples
         verbose: Print progress messages
+        use_blast_fallback: Use BLAST search for sequences not found or mismatched
 
     Returns:
-        tuple: (invalid set, not_found set, mismatched set)
-            - invalid: all sequences that failed validation (union of not_found and mismatched)
-            - not_found: sequences where accession wasn't found in NCBI
-            - mismatched: sequences where data doesn't match NCBI
+        tuple: (invalid set, not_found set, mismatched set, blast_fixed dict)
+            - invalid: all sequences that failed validation (after BLAST attempts)
+            - not_found: sequences where accession wasn't found in NCBI (and BLAST failed)
+            - mismatched: sequences where data doesn't match NCBI (and BLAST failed)
+            - blast_fixed: dict mapping old seq_name to new accession/coords from BLAST
     """
     from Bio import SeqIO
     from Bio.Seq import Seq
 
     not_found = set()
     mismatched = set()
+    blast_fixed = {}
 
     for seq_name, seq_data in sequence_entries:
         accession, coords = parse_sequence_identifier(seq_name)
@@ -351,49 +356,75 @@ def validate_sequences_against_ncbi(sequence_entries, verbose=False):
 
         start, end = int(match.group(1)), int(match.group(2))
 
+        # Remove gaps from Stockholm sequence (needed for both validation and BLAST)
+        stockholm_seq = seq_data.replace('.', '').replace('-', '').upper()
+
         # Get FASTA file
+        ncbi_ok = False
         try:
             fasta_file = get_fasta_file(accession)
             fasta = SeqIO.read(fasta_file, "fasta")
+
+            # Extract subsequence from NCBI (handle forward and reverse strand)
+            # Convert to 0-based indexing
+            if start < end:
+                # Forward strand
+                ncbi_subseq = str(fasta.seq[start - 1:end]).upper()
+            else:
+                # Reverse strand
+                ncbi_subseq = str(fasta.seq[end - 1:start].reverse_complement()).upper()
+
+            # Convert RNA to DNA for comparison (NCBI stores DNA)
+            stockholm_seq_dna = str(Seq(stockholm_seq).back_transcribe())
+
+            # Compare
+            if stockholm_seq_dna == ncbi_subseq:
+                ncbi_ok = True
+                if verbose:
+                    print(f"  {seq_name}: validated OK")
+            else:
+                if verbose:
+                    print(f"  {seq_name}: MISMATCH with NCBI")
+                    if len(stockholm_seq_dna) != len(ncbi_subseq):
+                        print(f"    Length: Stockholm={len(stockholm_seq_dna)}, NCBI={len(ncbi_subseq)}")
+                    else:
+                        # Show first difference
+                        for i, (a, b) in enumerate(zip(stockholm_seq_dna, ncbi_subseq)):
+                            if a != b:
+                                print(f"    First difference at position {i+1}: Stockholm={a}, NCBI={b}")
+                                break
+
         except Exception as e:
             if verbose:
                 print(f"  {seq_name}: accession NOT FOUND in NCBI ({e})")
-            not_found.add(seq_name)
+
+        if ncbi_ok:
             continue
 
-        # Extract subsequence from NCBI (handle forward and reverse strand)
-        # Convert to 0-based indexing
-        if start < end:
-            # Forward strand
-            ncbi_subseq = str(fasta.seq[start - 1:end]).upper()
-        else:
-            # Reverse strand
-            ncbi_subseq = str(fasta.seq[end - 1:start].reverse_complement()).upper()
-
-        # Remove gaps from Stockholm sequence for comparison
-        stockholm_seq = seq_data.replace('.', '').replace('-', '').upper()
-
-        # Convert RNA to DNA for comparison (NCBI stores DNA)
-        stockholm_seq_dna = str(Seq(stockholm_seq).back_transcribe())
-
-        # Compare
-        if stockholm_seq_dna != ncbi_subseq:
+        # Validation failed — try BLAST fallback
+        if use_blast_fallback:
             if verbose:
-                print(f"  {seq_name}: MISMATCH with NCBI")
-                if len(stockholm_seq_dna) != len(ncbi_subseq):
-                    print(f"    Length: Stockholm={len(stockholm_seq_dna)}, NCBI={len(ncbi_subseq)}")
-                else:
-                    # Show first difference
-                    for i, (a, b) in enumerate(zip(stockholm_seq_dna, ncbi_subseq)):
-                        if a != b:
-                            print(f"    First difference at position {i+1}: Stockholm={a}, NCBI={b}")
-                            break
+                print(f"    Trying BLAST fallback for {seq_name}...")
+            blast_result, is_accurate = blast_search(stockholm_seq, verbose=verbose)
+            if is_accurate and blast_result:
+                if verbose:
+                    print(f"    {seq_name} -> {blast_result} (via BLAST)")
+                blast_fixed[seq_name] = blast_result
+                continue
+
+        # Neither direct validation nor BLAST succeeded
+        # Determine which category this failure belongs to
+        try:
+            # If we got here via the except branch, it's not_found
+            fasta_file = get_fasta_file(accession)
+            SeqIO.read(fasta_file, "fasta")
+            # If we can read it, it was a mismatch
             mismatched.add(seq_name)
-        elif verbose:
-            print(f"  {seq_name}: validated OK")
+        except Exception:
+            not_found.add(seq_name)
 
     invalid = not_found | mismatched
-    return invalid, not_found, mismatched
+    return invalid, not_found, mismatched, blast_fixed
 
 
 def find_duplicates_from_entries(sequence_entries):
