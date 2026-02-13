@@ -251,10 +251,21 @@ def fix_file(filepath, output_mode='file', verbose=False):
         processed_sequences = [(name, seq) for name, seq in processed_sequences if name not in overlapping]
         num_removed += len(overlapping)
 
-    # Validate sequences against NCBI
+    # Validate sequences against NCBI (with BLAST fallback)
     if verbose:
         print(f"  Validating {len(processed_sequences)} sequence(s) against NCBI...")
-    invalid_seqs, not_found_seqs, mismatched_seqs = fixable_errors.validate_sequences_against_ncbi(processed_sequences, verbose=verbose)
+    invalid_seqs, not_found_seqs, mismatched_seqs, blast_fixed = fixable_errors.validate_sequences_against_ncbi(processed_sequences, verbose=verbose)
+
+    # Apply BLAST fixes: update sequence names with BLAST-found accession/coords
+    if blast_fixed:
+        if verbose:
+            print(f"  {len(blast_fixed)} sequence(s) rescued via BLAST")
+        processed_sequences = [
+            (blast_fixed[name], seq) if name in blast_fixed else (name, seq)
+            for name, seq in processed_sequences
+        ]
+        num_fixes += len(blast_fixed)
+
     if invalid_seqs:
         if not_found_seqs:
             print(f"  {len(not_found_seqs)} sequence(s) not found in NCBI (invalid accession?)")
