@@ -12,11 +12,16 @@ import warnings as stdlib_warnings
 stdlib_warnings.filterwarnings("ignore", module="Bio")
 
 import sys
+import io
+import shutil
+import subprocess
+import tempfile
 import argparse
 from pathlib import Path
 
 # Import validation modules
-from scripts import fatal_errors, fixable_errors, stockholm_warnings as warnings, parser
+from scripts import fatal_errors, fixable_errors, stockholm_warnings as warnings, parser, alignment_stats
+from scripts.config import CMSCAN_MAX_EVALUE
 
 
 def validate_stockholm_file(filepath):
@@ -123,7 +128,112 @@ def validate_stockholm_file(filepath):
     }
 
 
-def fix_file(filepath, output_mode='file', verbose=False):
+def find_cm_db(filepath):
+    """Auto-detect Rfam.cm in the same directory as the input file."""
+    input_dir = Path(filepath).parent
+    rfam_cm = input_dir / 'Rfam.cm'
+    if rfam_cm.exists():
+        return str(rfam_cm)
+    return None
+
+
+def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_threshold=CMSCAN_MAX_EVALUE):
+    """
+    Filter out sequences that match existing Rfam families using cmscan.
+
+    Only removes sequences with E-value below the threshold (i.e., strong,
+    significant hits to known families). Weak/spurious hits are kept.
+
+    Args:
+        sequence_entries: List of (seq_name, seq_data) tuples
+        cm_db: Path to Rfam CM database file
+        verbose: Print progress
+        evalue_threshold: E-value cutoff for removal (default 1e-3; lower = stricter)
+
+    Returns:
+        tuple: (to_remove set, hit_details list of strings for reporting)
+    """
+    if not shutil.which('cmscan'):
+        if verbose:
+            print("  Warning: cmscan not found. Install Infernal to filter known Rfam families.")
+        return set(), []
+
+    to_remove = set()
+    hit_details = []
+
+    try:
+        tmpdir = tempfile.mkdtemp(prefix='rfam_cmscan_')
+
+        # Write ungapped sequences as FASTA
+        fasta_path = tmpdir + '/sequences.fasta'
+        with open(fasta_path, 'w') as f:
+            for name, seq in sequence_entries:
+                ungapped = seq.replace('.', '').replace('-', '')
+                f.write(f">{name}\n{ungapped}\n")
+
+        # Run cmscan
+        tblout_path = tmpdir + '/hits.tbl'
+        cmd = [
+            'cmscan', '--noali', '--tblout', tblout_path,
+            cm_db, fasta_path
+        ]
+        if verbose:
+            print(f"  Filtering against known Rfam families ({cm_db}), E-value threshold={evalue_threshold}...")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            if verbose:
+                print(f"  Warning: cmscan failed: {result.stderr.strip()}")
+            return set(), []
+
+        # Parse tblout — keep best hit per sequence (first occurrence)
+        seen = set()
+        with open(tblout_path, 'r') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                fields = line.split()
+                if len(fields) < 16:
+                    continue
+                # tblout format: target_name target_acc query_name query_acc ... E-value score ...
+                family_name = fields[0]
+                family_acc = fields[1]
+                seq_name = fields[2]
+                evalue_str = fields[15]
+                score = fields[14]
+
+                if seq_name in seen:
+                    continue
+                seen.add(seq_name)
+
+                try:
+                    evalue = float(evalue_str)
+                except ValueError:
+                    continue
+
+                if evalue <= evalue_threshold:
+                    to_remove.add(seq_name)
+                    detail = f"  {seq_name}: matches {family_acc} ({family_name}), E-value={evalue_str} -- REMOVED"
+                    hit_details.append(detail)
+                    if verbose:
+                        print(detail)
+                else:
+                    if verbose:
+                        print(f"  {seq_name}: weak hit to {family_acc} ({family_name}), E-value={evalue_str} -- kept")
+
+        if verbose and not to_remove:
+            print("  No sequences significantly match known Rfam families.")
+
+        return to_remove, hit_details
+
+    except Exception as e:
+        if verbose:
+            print(f"  Warning: cmscan filtering failed: {e}")
+        return set(), []
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
     """
     Fix fixable errors in a Stockholm file.
 
@@ -131,11 +241,16 @@ def fix_file(filepath, output_mode='file', verbose=False):
         filepath: Path to input Stockholm file
         output_mode: 'stdout' to print to stdout, 'file' to create _corrected file
         verbose: Print progress messages
+        cm_db: Path to Rfam CM database for filtering known families (auto-detected if None)
 
     Returns:
         tuple: (success, num_fixes_applied, output_path)
     """
     import re
+
+    # Resolve CM database for filtering known families
+    if cm_db is None:
+        cm_db = find_cm_db(filepath)
 
     try:
         with open(filepath, 'r') as f:
@@ -152,6 +267,12 @@ def fix_file(filepath, output_mode='file', verbose=False):
     num_fixes = 0
     id_mapping = {}
     to_remove = set()
+
+    # Filter sequences matching known Rfam families (first step)
+    if cm_db:
+        known_to_remove, _ = filter_known_families(sequence_entries, cm_db, verbose=verbose)
+        if known_to_remove:
+            to_remove.update(known_to_remove)
 
     # Fix missing coordinates if any
     if missing_coords:
@@ -307,6 +428,16 @@ def fix_file(filepath, output_mode='file', verbose=False):
     if verbose and num_removed > 0:
         print(f"  Removed {num_removed} sequence(s) total from output")
 
+    # Compute pairwise identity on final alignment
+    if processed_sequences and verbose:
+        pid_results = alignment_stats.compute_pairwise_identity(processed_sequences)
+        if pid_results:
+            avg_all = sum(r[1] for r in pid_results) / len(pid_results)
+            print(f"\n  Pairwise identity (avg {avg_all:.1f}%):")
+            for name, avg_id, _ in pid_results:
+                flag = " <-- LOW" if avg_id < avg_all - 20 else ""
+                print(f"    {name:<40} {avg_id:.1f}%{flag}")
+
     if output_mode == 'stdout':
         for line in corrected_lines:
             print(line, end='')
@@ -319,6 +450,23 @@ def fix_file(filepath, output_mode='file', verbose=False):
             f.writelines(corrected_lines)
 
         return True, num_fixes, str(output_path)
+
+
+class TeeOutput:
+    """Write to both the original stdout and a buffer."""
+    def __init__(self, original):
+        self.original = original
+        self.buffer = io.StringIO()
+
+    def write(self, text):
+        self.original.write(text)
+        self.buffer.write(text)
+
+    def flush(self):
+        self.original.flush()
+
+    def getvalue(self):
+        return self.buffer.getvalue()
 
 
 def main():
@@ -347,25 +495,35 @@ def main():
         default='file',
         help='Output mode for fixed files: stdout or create _corrected file (default: file)'
     )
-    
+    parser_arg.add_argument(
+        '--cm-db',
+        default=None,
+        help='Path to Rfam CM database (e.g., Rfam.cm) to filter sequences matching known families'
+    )
     args = parser_arg.parse_args()
     
     all_valid = True
     
     for filepath in args.files:
         path = Path(filepath)
-        
+
         if not path.exists():
             print(f"ERROR: File not found: {filepath}")
             all_valid = False
             continue
-        
+
+        # Capture output for report file when fixing in file mode
+        tee = None
+        if args.fix and args.output_mode == 'file':
+            tee = TeeOutput(sys.stdout)
+            sys.stdout = tee
+
         # Validate the file
         result = validate_stockholm_file(filepath)
-        
+
         # Handle fixing if requested (always run to validate sequences against NCBI)
         if args.fix and result['is_valid']:
-            success, num_fixes, output_path = fix_file(filepath, args.output_mode, verbose=args.verbose)
+            success, num_fixes, output_path = fix_file(filepath, args.output_mode, verbose=args.verbose, cm_db=args.cm_db)
             if success:
                 if args.output_mode == 'file':
                     print(f"✓ Fixed {num_fixes} issue(s) in {filepath}")
@@ -373,46 +531,55 @@ def main():
                 else:
                     # Already printed to stdout
                     pass
-                
+
                 # Re-validate the fixed content
                 if args.output_mode == 'file':
                     result = validate_stockholm_file(output_path)
-        
+                    filepath = output_path
+
         # Display results
         if result['is_valid'] and not result['fixable_errors']:
             if args.verbose or result['warnings']:
                 print(f"✓ {filepath}: Valid Stockholm file")
-            
+
             # Display warnings
             for warning in result['warnings']:
                 print(f"  ⚠ Warning: {warning}")
-        
+
         elif result['is_valid'] and result['fixable_errors']:
             print(f"⚠ {filepath}: Valid but has fixable issues")
             for error in result['fixable_errors']:
                 print(f"  • {error}")
-            
+
             # Display warnings
             for warning in result['warnings']:
                 print(f"  ⚠ Warning: {warning}")
-            
+
             if not args.fix:
                 print(f"  Tip: Use --fix to automatically correct these issues")
-        
+
         else:
             print(f"✗ {filepath}: INVALID")
             for error in result['fatal_errors']:
                 print(f"  - {error}")
-            
+
             # Display fixable errors
             for error in result['fixable_errors']:
                 print(f"  • Fixable: {error}")
-            
+
             # Display warnings
             for warning in result['warnings']:
                 print(f"  ⚠ Warning: {warning}")
-            
+
             all_valid = False
+
+        # Write report file
+        if tee is not None:
+            sys.stdout = tee.original
+            report_path = path.parent / f"{path.stem}_Report.txt"
+            with open(report_path, 'w') as f:
+                f.write(tee.getvalue())
+            print(f"  Report saved to: {report_path}")
     
     if all_valid:
         print(f"\nAll {len(args.files)} file(s) passed validation.")
