@@ -1,0 +1,21 @@
+When running validate_stockholm.py --fix, the script performs these steps in order:                                                                                       
+                                                                                                                                                                            
+  1. Parse Stockholm file - Read and parse the input file structure                                                                                                         
+  2. Fix missing coordinates - For sequences without coordinates (e.g., NZ_CP038662.1):                                                                                     
+    - NCBI Direct Lookup: Download FASTA from NCBI, find sequence match to get coordinates                                                                                  
+    - BLAST Fallback: If direct lookup fails, run BLAST search (≥95% identity, ≥90% coverage, e-value ≤1e-10)                                                               
+    - Mark for removal: Sequences that fail both methods                                                                                                                    
+  3. Remove duplicates - Remove sequences with identical accession, coordinates, and sequence data                                                                          
+  4. Remove overlapping sequences - For sequences from the same accession that overlap by ≥1 bp, use greedy interval scheduling to keep maximum non-overlapping set         
+  5. Validate against NCBI - For all remaining sequences:                                                                                                                   
+    - Fetch FASTA from NCBI using accession                                                                                                                                 
+    - Extract subsequence at given coordinates                                                                                                                              
+    - Compare with Stockholm sequence (gaps removed, RNA→DNA converted)                                                                                                     
+    - Remove sequences that don't match or have invalid accessions                                                                                                          
+  6. Write output - Save corrected file with proper Stockholm format order:                                                                                                 
+    - # STOCKHOLM 1.0 header                                                                                                                                                
+    - #=GF annotations (file-level)                                                                                                                                         
+    - #=GS annotations (sequence-level)                                                                                                                                     
+    - Sequences                                                                                                                                                             
+    - #=GC annotations (column-level)                                                                                                                                       
+    - // terminator    
