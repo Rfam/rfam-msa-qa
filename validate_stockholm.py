@@ -107,9 +107,12 @@ def validate_stockholm_file(filepath):
         fixable_error_list.append(f"Found {len(overlapping)} overlapping sequence(s)")
 
     # Check for warnings
-    has_warning, warning_msg = warnings.check_ss_cons(lines)
+    has_warning, warning_msgs = warnings.check_ss_cons(lines)
     if has_warning:
-        warning_list.append(warning_msg)
+        if isinstance(warning_msgs, list):
+            warning_list.extend(warning_msgs)
+        else:
+            warning_list.append(warning_msgs)
     
     has_warning, warning_msgs = warnings.check_line_length(lines)
     if has_warning:
@@ -413,12 +416,29 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
         elif orig_seq_id in kept_seq_names:
             corrected_lines.append(ann_line)
 
+    # Compute column width: max of sequence names and #=GC tag names
+    name_width = 30
+    if processed_sequences:
+        name_width = max(name_width, max(len(n) for n, _ in processed_sequences) + 1)
+    for gc_line in gc_lines:
+        parts = gc_line.strip().split(None, 2)
+        if len(parts) >= 2:
+            gc_tag = f"#=GC {parts[1]}"
+            name_width = max(name_width, len(gc_tag) + 1)
+
     # 4. Sequences
     for new_name, seq_content in processed_sequences:
-        corrected_lines.append(f"{new_name:<30} {seq_content}\n")
+        corrected_lines.append(f"{new_name:<{name_width}} {seq_content}\n")
 
-    # 5. Column-level annotations (#=GC) - after sequences
-    corrected_lines.extend(gc_lines)
+    # 5. Column-level annotations (#=GC) - after sequences, aligned to same width
+    for gc_line in gc_lines:
+        parts = gc_line.strip().split(None, 2)
+        if len(parts) >= 3:
+            gc_tag = f"#=GC {parts[1]}"
+            gc_data = parts[2]
+            corrected_lines.append(f"{gc_tag:<{name_width}} {gc_data}\n")
+        else:
+            corrected_lines.append(gc_line)
 
     corrected_lines.extend(footer_lines)
 

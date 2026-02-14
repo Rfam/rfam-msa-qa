@@ -36,6 +36,8 @@ Options:
 
 **Warnings** (non-critical):
 - Missing 2D structure consensus annotation (`#=GC SS_cons`)
+- `#=GC SS_cons` length mismatch with sequence length
+- `#=GC SS_cons` invalid WUSS notation characters or unbalanced brackets
 - Lines exceeding 10,000 character limit
 
 ### Modular Architecture
@@ -104,6 +106,23 @@ Only sequences with significant cmscan hits (E-value <= 1e-3 by default) are rem
 # Filter known families during fixing
 python3 validate_stockholm.py -v --fix --cm-db Rfam.cm input.sto
 ```
+
+### Building a Live CM Database from SVN
+
+The released `Rfam.cm` is static and only updated with each Rfam release. To filter against the latest curated families (including those not yet released), you can build a live CM database directly from the Rfam SVN repository:
+
+```bash
+# Build live CM database (downloads all family CMs and runs cmpress)
+python3 scripts/build_live_cm.py
+
+# Custom output path
+python3 scripts/build_live_cm.py --output /path/to/Rfam_live.cm
+
+# Then use with the validator
+python3 validate_stockholm.py -v --fix --cm-db Rfam_live.cm input.sto
+```
+
+This fetches CM files from `https://svn.rfam.org/svn/data_repos/trunk/Families/` (publicly readable, no credentials needed) and concatenates them into a single pressed CM database. Requires `wget` and `cmpress` (Infernal) in your PATH.
 
 ### Pairwise Identity
 
