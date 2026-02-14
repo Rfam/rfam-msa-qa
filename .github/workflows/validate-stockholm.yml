@@ -1,8 +1,3 @@
-# Lightweight CI validation for Stockholm MSA files.
-# Runs format checks only (header, terminator, sequence lengths, characters,
-# duplicates, warnings). Does NOT run --fix, BLAST, NCBI lookups, or cmscan,
-# so no external tools (Infernal, BioPython) are required.
-
 name: Validate Stockholm Files
 
 on:
@@ -11,7 +6,6 @@ on:
       - '**.so'
       - '**.sto'
       - '**.stk'
-      - '**.stockholm'
 
 jobs:
   validate:
