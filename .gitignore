@@ -22,3 +22,6 @@ Thumbs.db
 *_corrected.so
 *_corrected.sto
 *_corrected.stk
+
+Rfam.cm*
+scripts/fasta/*

@@ -22,6 +22,15 @@ BLAST_HITLIST_SIZE = 5
 
 
 # =============================================================================
+# Rfam CM Filtering Parameters (cmscan)
+# =============================================================================
+
+# Maximum e-value to consider a cmscan hit significant (sequences with
+# E-value below this threshold are removed as belonging to known families)
+CMSCAN_MAX_EVALUE = 1e-3
+
+
+# =============================================================================
 # NCBI Request Parameters
 # =============================================================================
 
