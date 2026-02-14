@@ -1,21 +1,53 @@
-When running validate_stockholm.py --fix, the script performs these steps in order:                                                                                       
-                                                                                                                                                                            
-  1. Parse Stockholm file - Read and parse the input file structure                                                                                                         
-  2. Fix missing coordinates - For sequences without coordinates (e.g., NZ_CP038662.1):                                                                                     
-    - NCBI Direct Lookup: Download FASTA from NCBI, find sequence match to get coordinates                                                                                  
-    - BLAST Fallback: If direct lookup fails, run BLAST search (≥95% identity, ≥90% coverage, e-value ≤1e-10)                                                               
-    - Mark for removal: Sequences that fail both methods                                                                                                                    
-  3. Remove duplicates - Remove sequences with identical accession, coordinates, and sequence data                                                                          
-  4. Remove overlapping sequences - For sequences from the same accession that overlap by ≥1 bp, use greedy interval scheduling to keep maximum non-overlapping set         
-  5. Validate against NCBI - For all remaining sequences:                                                                                                                   
-    - Fetch FASTA from NCBI using accession                                                                                                                                 
-    - Extract subsequence at given coordinates                                                                                                                              
-    - Compare with Stockholm sequence (gaps removed, RNA→DNA converted)                                                                                                     
-    - Remove sequences that don't match or have invalid accessions                                                                                                          
-  6. Write output - Save corrected file with proper Stockholm format order:                                                                                                 
-    - # STOCKHOLM 1.0 header                                                                                                                                                
-    - #=GF annotations (file-level)                                                                                                                                         
-    - #=GS annotations (sequence-level)                                                                                                                                     
-    - Sequences                                                                                                                                                             
-    - #=GC annotations (column-level)                                                                                                                                       
-    - // terminator    
+
+Note: Where possible, biocurators should provide sequences with accession and coordinates in the format ACCESSION/START-END (e.g., NC_000943/10656-10721) as they appear in the source seed alignment. This avoids unnecessary NCBI lookups and BLAST searches during validation.
+
+When running validate_stockholm.py --fix, the script performs these steps in order:
+
+  1. Parse Stockholm file - Read and parse the input file structure
+  2. Filter known Rfam families (optional, requires --cm-db) - Run cmscan against the
+     Rfam CM database to identify sequences belonging to existing families.
+     Only significant hits (E-value <= 1e-3 by default) are removed; weak hits are kept.
+     Rfam.cm must be downloaded from https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz
+     and prepared with: gunzip Rfam.cm.gz && cmpress Rfam.cm
+     Alternatively, build a live CM database from SVN with: python3 scripts/build_live_cm.py
+     (fetches the latest CMs from https://svn.rfam.org/svn/data_repos/trunk/Families/)
+     Requires Infernal (cmscan) to be installed and in PATH.
+  3. Fix missing coordinates - For sequences without coordinates (e.g., NZ_CP038662.1):
+    - NCBI Direct Lookup: Download FASTA from NCBI, find sequence match to get coordinates
+    - BLAST Fallback: If direct lookup fails, run BLAST search (>=95% identity, >=90% coverage, e-value <=1e-10)
+    - Mark for removal: Sequences that fail both methods
+  4. Remove duplicates - Remove sequences with identical accession, coordinates, and sequence data
+  5. Remove overlapping sequences - For sequences from the same accession that overlap by >=1 bp, use greedy interval scheduling to keep maximum non-overlapping set
+  6. Validate against NCBI (with BLAST fallback) - For all remaining sequences:
+    - Fetch FASTA from NCBI using accession
+    - Extract subsequence at given coordinates
+    - Compare with Stockholm sequence (gaps removed, RNA to DNA converted)
+    - If accession not found or sequence mismatches: run BLAST search as fallback
+    - If BLAST finds a hit (>=95% identity, >=90% coverage, e-value <=1e-10): update accession/coordinates
+    - Remove sequences that fail both NCBI validation and BLAST
+  7. Compute pairwise identity - Calculate average pairwise identity per sequence
+     and flag outliers (>20 percentage points below alignment average)
+  8. Write output - Save corrected file with proper Stockholm format order:
+    - # STOCKHOLM 1.0 header
+    - #=GF annotations (file-level)
+    - #=GS annotations (sequence-level)
+    - Sequences
+    - #=GC annotations (column-level)
+    - // terminator
+  9. Generate report - Save a report file (<stem>_Report.txt) capturing the full
+     verbose output of the validation and fixing process
+
+Warnings (checked during validation, with or without --fix):
+  - Missing #=GC SS_cons annotation
+  - #=GC SS_cons length mismatch with sequence length
+  - #=GC SS_cons invalid WUSS notation characters or unbalanced brackets
+    (valid: . () <> [] {} Aa Bb Cc Dd , : _ - ~)
+  - Lines exceeding 10,000 characters
+
+Configuration (scripts/config.py):
+  - BLAST_MIN_IDENTITY = 95       (minimum identity % for BLAST hits)
+  - BLAST_MIN_COVERAGE = 90       (minimum coverage % for BLAST hits)
+  - BLAST_MAX_EVALUE = 1e-10      (maximum e-value for BLAST hits)
+  - BLAST_HITLIST_SIZE = 5        (number of BLAST hits to retrieve)
+  - CMSCAN_MAX_EVALUE = 1e-3      (maximum e-value for cmscan known-family filtering)
+  - NCBI_REQUEST_DELAY = 0.5      (delay between NCBI requests in seconds)
