@@ -1,0 +1,11 @@
+name: rfam-msa-qa
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.8
+  - biopython
+  - infernal
+  - blast
+  - wget
