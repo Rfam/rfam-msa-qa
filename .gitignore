@@ -18,10 +18,5 @@ build/
 .DS_Store
 Thumbs.db
 
-# Corrected files from validation
-*_corrected.so
-*_corrected.sto
-*_corrected.stk
-
 Rfam.cm*
 scripts/fasta/*
