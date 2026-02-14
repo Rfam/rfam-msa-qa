@@ -63,20 +63,34 @@ def download_cm(family):
     return result.stdout
 
 
-def rename_cm(cm_text, family):
-    """Rename the NAME field in a CM file to the family ID.
+def extract_first_model(cm_text, family):
+    """Extract the first CM model and rename its NAME to the family ID.
 
-    SVN CM files are built with `cmbuild -F CM SEED`, so they all have
-    NAME=SEED. We replace the NAME with the family ID (e.g., RF00001)
-    to ensure unique primary keys when pressed into a single database.
+    SVN CM files may contain multiple models (e.g., calibrated + uncalibrated),
+    each terminated by '//'. We keep only the first model (the calibrated one)
+    and rename its NAME from 'SEED' to the family ID (e.g., RF00001) to ensure
+    unique primary keys when pressed into a single database.
     """
-    return re.sub(
+    # Find the first complete model: everything up to and including the first '//'
+    end = cm_text.find("\n//\n")
+    if end == -1:
+        # Try without trailing newline (end of file)
+        end = cm_text.find("\n//")
+        if end == -1:
+            return None
+        model = cm_text[:end + 3]  # include \n//
+    else:
+        model = cm_text[:end + 4]  # include \n//\n
+
+    # Rename NAME field to the family ID
+    model = re.sub(
         r'^(NAME\s+)\S+',
         rf'\g<1>{family}',
-        cm_text,
+        model,
         count=1,
         flags=re.MULTILINE,
     )
+    return model
 
 
 def build_live_cm(output_path, delay=0.1):
@@ -95,11 +109,14 @@ def build_live_cm(output_path, delay=0.1):
         for i, family in enumerate(families, 1):
             cm_text = download_cm(family)
             if cm_text:
-                cm_text = rename_cm(cm_text, family)
-                out.write(cm_text)
-                if not cm_text.endswith("\n"):
-                    out.write("\n")
-                downloaded += 1
+                model = extract_first_model(cm_text, family)
+                if model:
+                    out.write(model)
+                    if not model.endswith("\n"):
+                        out.write("\n")
+                    downloaded += 1
+                else:
+                    skipped += 1
             else:
                 skipped += 1
 
