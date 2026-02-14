@@ -9,6 +9,8 @@ When running validate_stockholm.py --fix, the script performs these steps in ord
      Only significant hits (E-value <= 1e-3 by default) are removed; weak hits are kept.
      Rfam.cm must be downloaded from https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz
      and prepared with: gunzip Rfam.cm.gz && cmpress Rfam.cm
+     Alternatively, build a live CM database from SVN with: python3 scripts/build_live_cm.py
+     (fetches the latest CMs from https://svn.rfam.org/svn/data_repos/trunk/Families/)
      Requires Infernal (cmscan) to be installed and in PATH.
   3. Fix missing coordinates - For sequences without coordinates (e.g., NZ_CP038662.1):
     - NCBI Direct Lookup: Download FASTA from NCBI, find sequence match to get coordinates
@@ -34,6 +36,13 @@ When running validate_stockholm.py --fix, the script performs these steps in ord
     - // terminator
   9. Generate report - Save a report file (<stem>_Report.txt) capturing the full
      verbose output of the validation and fixing process
+
+Warnings (checked during validation, with or without --fix):
+  - Missing #=GC SS_cons annotation
+  - #=GC SS_cons length mismatch with sequence length
+  - #=GC SS_cons invalid WUSS notation characters or unbalanced brackets
+    (valid: . () <> [] {} Aa Bb Cc Dd , : _ - ~)
+  - Lines exceeding 10,000 characters
 
 Configuration (scripts/config.py):
   - BLAST_MIN_IDENTITY = 95       (minimum identity % for BLAST hits)
