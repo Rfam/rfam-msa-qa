@@ -1,48 +1,54 @@
-# Lightweight CI validation for Stockholm MSA files.
-# Runs format checks only (header, terminator, sequence lengths, characters,
-# duplicates, warnings). Does NOT run --fix, BLAST, NCBI lookups, or cmscan,
-# so no external tools (Infernal, BioPython) are required.
-
-name: Validate Stockholm Files
+name: Validate and Fix Stockholm Files
 
 on:
-  pull_request:
+  push:
+    branches-ignore:
+      - main
     paths:
       - '**.so'
       - '**.sto'
       - '**.stk'
       - '**.stockholm'
-      
+
 jobs:
-  validate:
-    name: Validate Stockholm MSA Files
+  validate-and-fix:
+    name: Validate and Fix Stockholm MSA Files
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-    
+      contents: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: '3.x'
-      
+          environment-file: environment.yml
+          activate-environment: rfam-msa-qa
+          channels: bioconda,conda-forge,defaults
+
+      - name: Prepare Rfam CM database
+        shell: bash -l {0}
+        run: |
+          gunzip -k models/15.1/Rfam.cm.gz
+          cmpress models/15.1/Rfam.cm
+
       - name: Get changed Stockholm files
         id: changed-files
         run: |
-          # Get the list of changed .so, .sto, and .stk files
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          if [ -z "$BASE_SHA" ]; then
-            BASE_SHA="origin/main"
+          BEFORE="${{ github.event.before }}"
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE="origin/main"
           fi
-          
-          git diff --name-only --diff-filter=ACMRT "$BASE_SHA" ${{ github.sha }} | \
-            grep -E '\.(so|sto|stk)$' > changed_files.txt || true
-          
+
+          # Get changed alignment files, excluding generated outputs
+          git diff --name-only --diff-filter=ACMRT "$BEFORE" "${{ github.sha }}" | \
+            grep -E '\.(so|sto|stk|stockholm)$' | \
+            grep -v '_corrected\.' > changed_files.txt || true
+
           if [ -s changed_files.txt ]; then
             echo "has_files=true" >> $GITHUB_OUTPUT
             echo "Changed Stockholm files:"
@@ -51,19 +57,46 @@ jobs:
             echo "has_files=false" >> $GITHUB_OUTPUT
             echo "No Stockholm files changed"
           fi
-      
-      - name: Validate Stockholm files
+
+      - name: Check files are in tests/ directory
         if: steps.changed-files.outputs.has_files == 'true'
         run: |
-          # Read files from changed_files.txt and validate using xargs
-          if [ -f changed_files.txt ] && [ -s changed_files.txt ]; then
-            echo "Validating Stockholm files..."
-            cat changed_files.txt | xargs python3 validate_stockholm.py -v
-          else
-            echo "No files to validate"
+          INVALID=$(grep -v '^tests/' changed_files.txt || true)
+          if [ -n "$INVALID" ]; then
+            echo "::error::Stockholm files must be placed in the tests/ directory. Found files outside tests/:"
+            echo "$INVALID"
+            exit 1
           fi
-      
-      - name: Report success
+
+      - name: Validate and fix Stockholm files
+        if: steps.changed-files.outputs.has_files == 'true'
+        shell: bash -l {0}
+        run: |
+          while IFS= read -r file; do
+            echo "========================================="
+            echo "Processing: $file"
+            echo "========================================="
+            python3 validate_stockholm.py -v --fix --cm-db models/15.1/Rfam.cm "$file"
+          done < changed_files.txt
+
+      - name: Commit corrected files and reports
+        if: steps.changed-files.outputs.has_files == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          find tests/ \( -name '*_corrected.*' -o -name '*_Report.txt' \) -exec git add {} +
+          if git diff --cached --quiet; then
+            echo "No corrected files to commit"
+          else
+            git commit -m "Add validation reports and corrected alignments [skip ci]"
+            git push
+          fi
+
+      - name: Report
         if: steps.changed-files.outputs.has_files == 'false'
         run: |
-          echo "✓ No Stockholm files were modified in this PR"
+          echo "No Stockholm files to process"
+
+        if: steps.changed-files.outputs.has_files == 'false'
+        run: |
+          echo "No Stockholm files to process"
