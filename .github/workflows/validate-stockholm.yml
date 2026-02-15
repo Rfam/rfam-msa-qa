@@ -96,7 +96,3 @@ jobs:
         if: steps.changed-files.outputs.has_files == 'false'
         run: |
           echo "No Stockholm files to process"
-
-        if: steps.changed-files.outputs.has_files == 'false'
-        run: |
-          echo "No Stockholm files to process"
