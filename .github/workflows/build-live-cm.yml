@@ -1,0 +1,67 @@
+name: Build Live Rfam CM Database
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-cm:
+    name: Build Rfam_live.cm from SVN
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build live CM database
+        run: |
+          python3 scripts/build_live_cm.py --no-press --output Rfam_live.cm
+
+      - name: Compress CM file
+        run: |
+          mkdir -p models/current
+          gzip -c Rfam_live.cm > models/current/Rfam_live.cm.gz
+
+      - name: Create PR with updated CM
+        run: |
+          BRANCH="auto/update-live-cm"
+          DATE=$(date +%Y-%m-%d)
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Delete remote branch if it exists (from a previous run)
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+
+          git checkout -b "$BRANCH"
+          git add models/current/Rfam_live.cm.gz
+          if git diff --cached --quiet; then
+            echo "No changes to Rfam_live.cm.gz"
+            exit 0
+          fi
+
+          git commit -m "Update Rfam_live.cm.gz from SVN ($DATE)"
+          git push -u origin "$BRANCH"
+
+          # Create PR
+          gh pr create \
+            --title "Update Rfam_live.cm.gz ($DATE)" \
+            --body "$(cat <<'EOF'
+          ## Summary
+          - Rebuilt `models/current/Rfam_live.cm.gz` from the Rfam SVN repository
+          - Contains the latest curated CM models for all Rfam families
+
+          Generated automatically by the Build Live CM workflow.
+          EOF
+          )" \
+            --base main \
+            --head "$BRANCH"
+        env:
+          GH_TOKEN: ${{ github.token }}
