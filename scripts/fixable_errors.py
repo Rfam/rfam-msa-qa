@@ -53,19 +53,27 @@ def find_missing_coordinates(sequence_entries):
     return missing
 
 
-def get_fasta_file(identifier):
+def get_fasta_file(identifier, max_retries=3):
     """
     Download fasta file from NCBI if not already downloaded.
+    Retries on transient network failures.
     """
     script_location = os.path.dirname(os.path.abspath(__file__))
     fasta_folder = os.path.join(script_location, 'fasta')
     os.makedirs(fasta_folder, exist_ok=True)
     fasta_file = os.path.join(fasta_folder, identifier + '.fasta')
     if not os.path.exists(fasta_file) or os.stat(fasta_file).st_size == 0:
-        time.sleep(config.NCBI_REQUEST_DELAY)  # Rate limit NCBI requests
         import subprocess
         url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id={identifier}&rettype=fasta&retmode=text"
-        subprocess.run(['curl', '-s', '-o', fasta_file, url], check=True)
+        for attempt in range(1, max_retries + 1):
+            time.sleep(config.NCBI_REQUEST_DELAY)
+            result = subprocess.run(['curl', '-s', '-o', fasta_file, url])
+            if result.returncode == 0 and os.path.exists(fasta_file) and os.stat(fasta_file).st_size > 0:
+                break
+            if attempt < max_retries:
+                time.sleep(2 * attempt)  # backoff before retry
+            else:
+                raise RuntimeError(f"Failed to download FASTA for {identifier} after {max_retries} attempts")
     return fasta_file
 
 
