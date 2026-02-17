@@ -26,7 +26,7 @@ BLAST_HITLIST_SIZE = 5
 # =============================================================================
 
 # Maximum e-value to consider a cmscan hit significant (sequences with
-# E-value below this threshold are removed as belonging to known families)
+# E-value below this threshold are flagged as warnings)
 CMSCAN_MAX_EVALUE = 1e-3
 
 
