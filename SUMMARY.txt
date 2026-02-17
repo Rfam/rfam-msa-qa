@@ -4,9 +4,10 @@ Note: Where possible, biocurators should provide sequences with accession and co
 When running validate_stockholm.py --fix, the script performs these steps in order:
 
   1. Parse Stockholm file - Read and parse the input file structure
-  2. Filter known Rfam families (optional, requires --cm-db) - Run cmscan against the
+  2. Check known Rfam families (optional, requires --cm-db) - Run cmscan against the
      Rfam CM database to identify sequences belonging to existing families.
-     Only significant hits (E-value <= 1e-3 by default) are removed; weak hits are kept.
+     Significant hits (E-value <= 1e-3 by default) are flagged as warnings but NOT removed.
+     Weak hits are noted separately.
      Rfam.cm must be downloaded from https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz
      and prepared with: gunzip Rfam.cm.gz && cmpress Rfam.cm
      Alternatively, build a live CM database from SVN with: python3 scripts/build_live_cm.py
@@ -38,6 +39,7 @@ When running validate_stockholm.py --fix, the script performs these steps in ord
      verbose output of the validation and fixing process
 
 Warnings (checked during validation, with or without --fix):
+  - Sequences matching known Rfam families (when --cm-db is provided) — flagged but not removed
   - Missing #=GC SS_cons annotation
   - #=GC SS_cons length mismatch with sequence length
   - #=GC SS_cons invalid WUSS notation characters or unbalanced brackets
@@ -49,5 +51,5 @@ Configuration (scripts/config.py):
   - BLAST_MIN_COVERAGE = 90       (minimum coverage % for BLAST hits)
   - BLAST_MAX_EVALUE = 1e-10      (maximum e-value for BLAST hits)
   - BLAST_HITLIST_SIZE = 5        (number of BLAST hits to retrieve)
-  - CMSCAN_MAX_EVALUE = 1e-3      (maximum e-value for cmscan known-family filtering)
+  - CMSCAN_MAX_EVALUE = 1e-3      (maximum e-value for cmscan known-family warnings)
   - NCBI_REQUEST_DELAY = 0.5      (delay between NCBI requests in seconds)

@@ -32,9 +32,9 @@ Options:
 - Duplicate sequences (same accession, coordinates, and sequence data)
 - Missing coordinates (sequences without start/end positions)
 - Overlapping sequences (sequences from the same accession that overlap by >=1 bp)
-- Sequences matching known Rfam families (when `--cm-db` is provided)
 
 **Warnings** (non-critical):
+- Sequences matching known Rfam families (when `--cm-db` is provided) — flagged but not removed
 - Missing 2D structure consensus annotation (`#=GC SS_cons`)
 - `#=GC SS_cons` length mismatch with sequence length
 - `#=GC SS_cons` invalid WUSS notation characters or unbalanced brackets
@@ -93,17 +93,17 @@ When using `--fix`, all sequences are validated against NCBI to ensure they matc
 
 ### Filtering Known Rfam Families (cmscan)
 
-When building a new Rfam family, you can filter out sequences that already belong to existing Rfam families using the `--cm-db` option. This requires:
+When building a new Rfam family, you can check whether sequences already belong to existing Rfam families using the `--cm-db` option. This requires:
 
 1. **Download Rfam.cm** from https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz
 2. **Decompress**: `gunzip Rfam.cm.gz`
 3. **Press the database**: `cmpress Rfam.cm` (generates `.i1f`, `.i1i`, `.i1m`, `.i1p` index files)
 4. **Install Infernal**: `cmscan` must be available in your PATH (http://eddylab.org/infernal/)
 
-Only sequences with significant cmscan hits (E-value <= 1e-3 by default) are removed. Weak or spurious hits are kept. The E-value threshold is configurable via `CMSCAN_MAX_EVALUE` in `scripts/config.py`.
+Sequences with significant cmscan hits (E-value <= 1e-3 by default) are flagged as warnings but **not removed**. Weak or spurious hits are noted separately. The E-value threshold is configurable via `CMSCAN_MAX_EVALUE` in `scripts/config.py`.
 
 ```bash
-# Filter known families during fixing
+# Check for known families during fixing
 python3 validate_stockholm.py -v --fix --cm-db Rfam.cm input.sto
 ```
 
@@ -142,7 +142,7 @@ Parameters can be adjusted in `scripts/config.py`:
 | `BLAST_MIN_COVERAGE` | 90 | Minimum coverage % for BLAST hits |
 | `BLAST_MAX_EVALUE` | 1e-10 | Maximum e-value for BLAST hits |
 | `BLAST_HITLIST_SIZE` | 5 | Number of BLAST hits to retrieve |
-| `CMSCAN_MAX_EVALUE` | 1e-3 | Maximum e-value for cmscan hits (known family filtering) |
+| `CMSCAN_MAX_EVALUE` | 1e-3 | Maximum e-value for cmscan hits (known family warnings) |
 | `NCBI_REQUEST_DELAY` | 0.5 | Delay between NCBI requests in seconds |
 
 ### Examples

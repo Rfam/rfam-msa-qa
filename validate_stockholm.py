@@ -142,26 +142,25 @@ def find_cm_db(filepath):
 
 def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_threshold=CMSCAN_MAX_EVALUE):
     """
-    Filter out sequences that match existing Rfam families using cmscan.
+    Check sequences against existing Rfam families using cmscan.
 
-    Only removes sequences with E-value below the threshold (i.e., strong,
-    significant hits to known families). Weak/spurious hits are kept.
+    Sequences with significant hits (E-value below threshold) are flagged
+    as warnings but NOT removed. Weak/spurious hits are noted separately.
 
     Args:
         sequence_entries: List of (seq_name, seq_data) tuples
         cm_db: Path to Rfam CM database file
         verbose: Print progress
-        evalue_threshold: E-value cutoff for removal (default 1e-3; lower = stricter)
+        evalue_threshold: E-value cutoff for warnings (default 1e-3; lower = stricter)
 
     Returns:
-        tuple: (to_remove set, hit_details list of strings for reporting)
+        list: hit_details list of warning strings for reporting
     """
     if not shutil.which('cmscan'):
         if verbose:
             print("  Warning: cmscan not found. Install Infernal to filter known Rfam families.")
-        return set(), []
+        return []
 
-    to_remove = set()
     hit_details = []
 
     try:
@@ -181,15 +180,16 @@ def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_thresho
             cm_db, fasta_path
         ]
         if verbose:
-            print(f"  Filtering against known Rfam families ({cm_db}), E-value threshold={evalue_threshold}...")
+            print(f"  Scanning against known Rfam families ({cm_db}), E-value threshold={evalue_threshold}...")
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             if verbose:
                 print(f"  Warning: cmscan failed: {result.stderr.strip()}")
-            return set(), []
+            return []
 
         # Parse tblout — keep best hit per sequence (first occurrence)
         seen = set()
+        warned = []
         with open(tblout_path, 'r') as f:
             for line in f:
                 if line.startswith('#'):
@@ -214,8 +214,8 @@ def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_thresho
                     continue
 
                 if evalue <= evalue_threshold:
-                    to_remove.add(seq_name)
-                    detail = f"  {seq_name}: matches {family_acc} ({family_name}), E-value={evalue_str} -- REMOVED"
+                    warned.append(seq_name)
+                    detail = f"  {seq_name}: matches {family_acc} ({family_name}), E-value={evalue_str} -- WARNING"
                     hit_details.append(detail)
                     if verbose:
                         print(detail)
@@ -223,15 +223,18 @@ def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_thresho
                     if verbose:
                         print(f"  {seq_name}: weak hit to {family_acc} ({family_name}), E-value={evalue_str} -- kept")
 
-        if verbose and not to_remove:
-            print("  No sequences significantly match known Rfam families.")
+        if verbose:
+            if warned:
+                print(f"  {len(warned)} sequence(s) match known Rfam families (see warnings above).")
+            else:
+                print("  No sequences significantly match known Rfam families.")
 
-        return to_remove, hit_details
+        return hit_details
 
     except Exception as e:
         if verbose:
             print(f"  Warning: cmscan filtering failed: {e}")
-        return set(), []
+        return []
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -267,11 +270,9 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
     id_mapping = {}
     to_remove = set()
 
-    # Filter sequences matching known Rfam families (first step)
+    # Check sequences against known Rfam families (warning only, no removal)
     if cm_db:
-        known_to_remove, _ = filter_known_families(sequence_entries, cm_db, verbose=verbose)
-        if known_to_remove:
-            to_remove.update(known_to_remove)
+        filter_known_families(sequence_entries, cm_db, verbose=verbose)
 
     # Fix missing coordinates if any
     if missing_coords:
