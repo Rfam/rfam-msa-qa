@@ -7,24 +7,24 @@
   URS0000572555_1268238/1-81: accession NOT FOUND in NCBI (No records found in handle)
     Trying BLAST fallback for URS0000572555_1268238/1-81...
     Running BLAST search (81 bp)...
-    BLAST hit: OZ369465.1/4493049-4493129 (identity=100.0%, coverage=100.0%, e=2.08e-31)
-    URS0000572555_1268238/1-81 -> OZ369465.1/4493049-4493129 (via BLAST)
+    BLAST hit: CP145099.1/2484992-2485072 (identity=100.0%, coverage=100.0%, e=2.01e-31)
+    URS0000572555_1268238/1-81 -> CP145099.1/2484992-2485072 (via BLAST)
   URS0000CB3E56_571/1-75: accession NOT FOUND in NCBI (No records found in handle)
     Trying BLAST fallback for URS0000CB3E56_571/1-75...
     Running BLAST search (75 bp)...
-    BLAST hit: CP129616.1/3758005-3757931 (identity=100.0%, coverage=100.0%, e=3.34e-28)
+    BLAST hit: CP129616.1/3758005-3757931 (identity=100.0%, coverage=100.0%, e=3.22e-28)
     URS0000CB3E56_571/1-75 -> CP129616.1/3758005-3757931 (via BLAST)
   URS0000DC8BA0_158822/1-74: accession NOT FOUND in NCBI (No records found in handle)
     Trying BLAST fallback for URS0000DC8BA0_158822/1-74...
     Running BLAST search (74 bp)...
-    BLAST hit: CP023526.1/129758-129685 (identity=100.0%, coverage=100.0%, e=1.14e-27)
+    BLAST hit: CP023526.1/129758-129685 (identity=100.0%, coverage=100.0%, e=1.10e-27)
     URS0000DC8BA0_158822/1-74 -> CP023526.1/129758-129685 (via BLAST)
   3 sequence(s) rescued via BLAST
   Removed 1 sequence(s) total from output
 
   Pairwise identity (avg 87.3%):
     CP023526.1/129758-129685                 85.6%
-    OZ369465.1/4493049-4493129               87.9%
+    CP145099.1/2484992-2485072               87.9%
     CP129616.1/3758005-3757931               88.4%
 ✓ Fixed 3 issue(s) in tests/xtr_starting_alignment.sto
   Corrected file saved to: tests/xtr_starting_alignment_corrected.sto
