@@ -93,9 +93,10 @@ def extract_first_model(cm_text, family):
     return model
 
 
-def build_live_cm(output_path, delay=0.1):
+def build_live_cm(output_path, delay=0.1, press=True):
     """Build a live Rfam CM database from SVN."""
-    check_cmpress()
+    if press:
+        check_cmpress()
 
     print("Fetching family list from Rfam SVN...")
     families = fetch_family_list()
@@ -129,16 +130,16 @@ def build_live_cm(output_path, delay=0.1):
     print(f"Done. Downloaded {downloaded} CMs, skipped {skipped}.")
     print(f"Output: {output_path}")
 
-    # Press the database
-    print("Running cmpress...")
-    result = subprocess.run(["cmpress", output_path], capture_output=True, text=True)
-    if result.returncode != 0:
-        print("Error: cmpress failed.", file=sys.stderr)
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
-        sys.exit(1)
+    if press:
+        print("Running cmpress...")
+        result = subprocess.run(["cmpress", output_path], capture_output=True, text=True)
+        if result.returncode != 0:
+            print("Error: cmpress failed.", file=sys.stderr)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+            sys.exit(1)
+        print("cmpress completed successfully.")
 
-    print("cmpress completed successfully.")
     print(f"CM database ready: {output_path}")
 
 
@@ -157,9 +158,14 @@ def main():
         default=0.1,
         help="Delay between requests in seconds (default: 0.1)"
     )
+    parser.add_argument(
+        "--no-press",
+        action="store_true",
+        help="Skip running cmpress (useful when only the raw CM file is needed)"
+    )
     args = parser.parse_args()
 
-    build_live_cm(args.output, delay=args.delay)
+    build_live_cm(args.output, delay=args.delay, press=not args.no_press)
 
 
 if __name__ == "__main__":
