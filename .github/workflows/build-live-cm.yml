@@ -51,16 +51,10 @@ jobs:
           git push -u origin "$BRANCH"
 
           # Create PR
+          BODY=$(printf "## Summary\n- Rebuilt models/current/Rfam_live.cm.gz from the Rfam SVN repository\n- Contains the latest curated CM models for all Rfam families\n\nGenerated automatically by the Build Live CM workflow.")
           gh pr create \
             --title "Update Rfam_live.cm.gz ($DATE)" \
-            --body "$(cat <<'EOF'
-## Summary
-- Rebuilt models/current/Rfam_live.cm.gz from the Rfam SVN repository
-- Contains the latest curated CM models for all Rfam families
-
-Generated automatically by the Build Live CM workflow.
-EOF
-          )" \
+            --body "$BODY" \
             --base main \
             --head "$BRANCH"
         env:
