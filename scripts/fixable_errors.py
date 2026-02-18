@@ -435,30 +435,70 @@ def validate_sequences_against_ncbi(sequence_entries, verbose=False, use_blast_f
     return invalid, not_found, mismatched, blast_fixed
 
 
-def find_duplicates_from_entries(sequence_entries):
+def find_duplicates_from_entries(sequence_entries, raw_entries=None):
     """
     Find duplicate sequences from a list of sequence entries.
-    
+
+    When raw_entries is provided (block-aware mode), duplicates are detected as
+    the same (accession, coords, seq_data) appearing multiple times within the
+    SAME block. Same name across different blocks is interleaved, not a duplicate.
+
     Args:
-        sequence_entries: List of (seq_name, seq_data) tuples
-        
+        sequence_entries: List of (seq_name, seq_data) tuples (merged if interleaved)
+        raw_entries: Optional list of (seq_name, seq_data, block_index) from parser
+
     Returns:
         tuple: (unique_sequences_dict, duplicate_indices)
     """
+    if raw_entries is not None:
+        return _find_duplicates_block_aware(sequence_entries, raw_entries)
+
+    # Legacy mode: same as before
     seen_keys = {}
     unique_sequences = {}
     duplicate_indices = []
-    
+
     for idx, (seq_name, seq_data) in enumerate(sequence_entries):
         accession, coords = parse_sequence_identifier(seq_name)
         key = (accession, coords, seq_data)
-        
+
         if key not in seen_keys:
             seen_keys[key] = idx
             unique_sequences[seq_name] = seq_data
         else:
             duplicate_indices.append(idx)
-    
+
+    return unique_sequences, duplicate_indices
+
+
+def _find_duplicates_block_aware(sequence_entries, raw_entries):
+    """
+    Detect true duplicates: same (accession, coords, data) appearing multiple
+    times within the SAME block. Repeated names across different blocks are
+    interleaved format, not duplicates.
+    """
+    from collections import defaultdict
+
+    # For each block, track (accession, coords, seq_data) keys
+    per_block_seen = defaultdict(lambda: defaultdict(int))
+    duplicate_names = set()
+
+    for seq_name, seq_data, block_idx in raw_entries:
+        accession, coords = parse_sequence_identifier(seq_name)
+        key = (accession, coords, seq_data)
+        per_block_seen[block_idx][key] += 1
+        if per_block_seen[block_idx][key] > 1:
+            duplicate_names.add(seq_name)
+
+    # Build unique_sequences from merged entries
+    unique_sequences = {}
+    duplicate_indices = []
+
+    for idx, (seq_name, seq_data) in enumerate(sequence_entries):
+        unique_sequences[seq_name] = seq_data
+        if seq_name in duplicate_names:
+            duplicate_indices.append(idx)
+
     return unique_sequences, duplicate_indices
 
 
