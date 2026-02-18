@@ -162,6 +162,7 @@ def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_thresho
         return []
 
     hit_details = []
+    tmpdir = None
 
     try:
         tmpdir = tempfile.mkdtemp(prefix='rfam_cmscan_')
@@ -236,7 +237,8 @@ def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_thresho
             print(f"  Warning: cmscan filtering failed: {e}")
         return []
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):

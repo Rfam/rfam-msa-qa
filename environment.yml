@@ -9,3 +9,4 @@ dependencies:
   - infernal
   - blast
   - wget
+  - curl
