@@ -49,7 +49,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Update Rfam_live.cm.gz from SVN ($DATE)"
+          git commit -m "Update Rfam_live.cm.gz from SVN ($DATE)" --author="Pedro Madrigal <8195212+pmb59@users.noreply.github.com>"
           git push -u origin "$BRANCH"
 
           # Create PR
