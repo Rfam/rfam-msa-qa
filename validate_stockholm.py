@@ -259,8 +259,6 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
     Returns:
         tuple: (success, num_fixes_applied, output_path)
     """
-    import re
-
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
@@ -362,6 +360,11 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
             for name, seq in processed_sequences
         ]
         num_fixes += len(blast_fixed)
+        # Merge BLAST renames into id_mapping so GR/GS annotations follow
+        for orig_name, _ in sequence_entries:
+            mapped = id_mapping.get(orig_name, orig_name)
+            if mapped in blast_fixed:
+                id_mapping[orig_name] = blast_fixed[mapped]
 
     if invalid_seqs:
         if not_found_seqs:

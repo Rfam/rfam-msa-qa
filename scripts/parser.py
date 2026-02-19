@@ -51,6 +51,8 @@ def parse_stockholm_file(lines):
     block_index = 0
     seen_data_in_block = False       # Have we seen seq/GR/GC in this block?
     seen_in_current_block = set()    # Seq names seen in the current block
+    seen_gr_in_current_block = set() # (seq_name, feature) GR keys seen in current block
+    seen_gc_in_current_block = set() # GC feature names seen in current block
 
     for line in lines:
         stripped = line.strip()
@@ -61,6 +63,8 @@ def parse_stockholm_file(lines):
                 block_index += 1
                 seen_data_in_block = False
                 seen_in_current_block = set()
+                seen_gr_in_current_block = set()
+                seen_gc_in_current_block = set()
             continue
 
         # Stockholm header
@@ -87,10 +91,14 @@ def parse_stockholm_file(lines):
                 data = parts[2].replace(' ', '')
                 if feature == 'SS_cons':
                     ss_cons_found = True
-                if feature in gc_annotations:
+                if feature in seen_gc_in_current_block:
+                    # Same GC feature in same block = duplicate, skip
+                    pass
+                elif feature in gc_annotations:
                     gc_annotations[feature] += data
                 else:
                     gc_annotations[feature] = data
+                seen_gc_in_current_block.add(feature)
             seen_data_in_block = True
             continue
 
@@ -112,10 +120,14 @@ def parse_stockholm_file(lines):
                 feature = parts[2]
                 data = parts[3].replace(' ', '')
                 key = (seq_name, feature)
-                if key in gr_annotations:
+                if key in seen_gr_in_current_block:
+                    # Same GR key in same block = duplicate, skip
+                    pass
+                elif key in gr_annotations:
                     gr_annotations[key] += data
                 else:
                     gr_annotations[key] = data
+                seen_gr_in_current_block.add(key)
             seen_data_in_block = True
             continue
 
