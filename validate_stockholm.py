@@ -46,12 +46,15 @@ def validate_stockholm_file(filepath):
             'can_be_fixed': False
         }
     
-    # Parse the file
+    # Parse the file (handles interleaved format by merging blocks)
     parsed = parser.parse_stockholm_file(lines)
     sequence_entries = parsed['sequence_entries']
-    
-    # Build unique sequences dict for validation
-    unique_sequences, duplicates = fixable_errors.find_duplicates_from_entries(sequence_entries)
+    raw_entries = parsed['raw_sequence_entries']
+
+    # Build unique sequences dict for validation (block-aware duplicate detection)
+    unique_sequences, duplicates = fixable_errors.find_duplicates_from_entries(
+        sequence_entries, raw_entries=raw_entries
+    )
     
     # Collect errors and warnings
     fatal_error_list = []
@@ -106,8 +109,10 @@ def validate_stockholm_file(filepath):
     if overlapping:
         fixable_error_list.append(f"Found {len(overlapping)} overlapping sequence(s)")
 
-    # Check for warnings
-    has_warning, warning_msgs = warnings.check_ss_cons(lines)
+    # Check for warnings (use merged GC annotations for interleaved support)
+    has_warning, warning_msgs = warnings.check_ss_cons_from_parsed(
+        parsed['gc_annotations'], sequence_entries
+    )
     if has_warning:
         if isinstance(warning_msgs, list):
             warning_list.extend(warning_msgs)
@@ -254,8 +259,6 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
     Returns:
         tuple: (success, num_fixes_applied, output_path)
     """
-    import re
-
     try:
         with open(filepath, 'r') as f:
             lines = f.readlines()
@@ -288,81 +291,49 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
         if verbose and to_remove:
             print(f"  {len(to_remove)} sequence(s) will be removed (no accurate match)")
 
+    # Use parser output for all line collections (handles interleaved format)
+    header_lines = parsed['header_lines']
+    gf_lines = parsed['gf_lines']
+    gs_lines = parsed['gs_lines']
+    gr_annotations = parsed['gr_annotations']   # {(seq_name, feature): full_data}
+    gc_annotations = parsed['gc_annotations']   # {feature: full_data}
+
+    # Count within-block duplicates already removed by the parser
+    seen_in_blocks = set()
+    num_parser_dupes = 0
+    for seq_name, seq_data, block_idx in parsed['raw_sequence_entries']:
+        key = (seq_name, block_idx)
+        if key in seen_in_blocks:
+            num_parser_dupes += 1
+        else:
+            seen_in_blocks.add(key)
+    if num_parser_dupes > 0 and verbose:
+        print(f"  Removed {num_parser_dupes} duplicate sequence(s)")
+
     # Apply coordinate fixes, remove bad sequences, and remove duplicates
-    header_lines = []
-    gf_lines = []  # #=GF lines go at top after header
-    gs_gr_lines = []  # #=GS/#=GR lines (sequence annotations)
-    gc_lines = []  # #=GC lines go at bottom before //
-    footer_lines = []
     processed_sequences = []  # List of (new_name, seq_content)
     seen_sequences = {}
-    num_duplicates = 0
+    num_duplicates = num_parser_dupes
     num_removed = 0
-    in_footer = False
 
-    for line in lines:
-        stripped = line.strip()
+    for seq_name, seq_content in sequence_entries:
+        # Skip sequences marked for removal
+        if seq_name in to_remove:
+            num_removed += 1
+            continue
 
-        if stripped == '//':
-            in_footer = True
-            footer_lines.append(line)
-        elif in_footer:
-            footer_lines.append(line)
-        elif stripped.startswith('# STOCKHOLM'):
-            header_lines.append(line)
-        elif stripped.startswith('#=GF'):
-            # File-level annotations - keep at top
-            gf_lines.append(line)
-        elif stripped.startswith('#=GC'):
-            # Column-level annotations - keep at bottom
-            gc_lines.append(line)
-        elif stripped.startswith('#=GS') or stripped.startswith('#=GR'):
-            # Sequence-level annotations - update accession if needed
-            parts = re.split(r'\s+', stripped)
-            if len(parts) >= 3:
-                seq_id = parts[1]
-                # Skip annotation for removed sequences
-                if seq_id in to_remove:
-                    continue
-                # Update accession if mapped
-                if seq_id in id_mapping:
-                    parts[1] = id_mapping[seq_id]
-                    info = ' '.join(parts[:-1])
-                    gs_gr_lines.append((seq_id, f"{info:<30} {parts[-1]}\n"))
-                else:
-                    gs_gr_lines.append((seq_id, line))
-            else:
-                gs_gr_lines.append((None, line))
-        elif stripped.startswith('#') or line == "\n":
-            # Other comments or blank lines - keep at top
-            header_lines.append(line)
-        elif stripped:
-            # Sequence line
-            parts = stripped.split(None, 1)
-            if len(parts) >= 2:
-                seq_name = parts[0]
-                seq_content = parts[1].replace(' ', '')
+        # Apply coordinate mapping if available
+        new_name = id_mapping.get(seq_name, seq_name)
 
-                # Skip sequences marked for removal
-                if seq_name in to_remove:
-                    num_removed += 1
-                    continue
+        # Check for duplicates
+        accession, coords = fixable_errors.parse_sequence_identifier(new_name)
+        key = (accession, coords, seq_content)
 
-                # Apply coordinate mapping if available
-                if seq_name in id_mapping:
-                    new_name = id_mapping[seq_name]
-                else:
-                    new_name = seq_name
-
-                # Check for duplicates
-                accession, coords = fixable_errors.parse_sequence_identifier(new_name)
-                key = (accession, coords, seq_content)
-
-                if key not in seen_sequences:
-                    seen_sequences[key] = True
-                    processed_sequences.append((new_name, seq_content))
-                else:
-                    num_duplicates += 1
+        if key not in seen_sequences:
+            seen_sequences[key] = True
+            processed_sequences.append((new_name, seq_content))
+        else:
+            num_duplicates += 1
 
     num_fixes += num_duplicates
 
@@ -389,6 +360,11 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
             for name, seq in processed_sequences
         ]
         num_fixes += len(blast_fixed)
+        # Merge BLAST renames into id_mapping so GR/GS annotations follow
+        for orig_name, _ in sequence_entries:
+            mapped = id_mapping.get(orig_name, orig_name)
+            if mapped in blast_fixed:
+                id_mapping[orig_name] = blast_fixed[mapped]
 
     if invalid_seqs:
         if not_found_seqs:
@@ -397,6 +373,28 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
             print(f"  {len(mismatched_seqs)} sequence(s) don't match NCBI data")
         processed_sequences = [(name, seq) for name, seq in processed_sequences if name not in invalid_seqs]
         num_removed += len(invalid_seqs)
+
+    # Build set of kept sequence names (final names after all mappings)
+    kept_seq_names = {name for name, _ in processed_sequences}
+    # Also track which original names were kept (for GR/GS lookup)
+    kept_original_names = set()
+    for seq_name, _ in sequence_entries:
+        mapped = id_mapping.get(seq_name, seq_name)
+        if mapped in kept_seq_names:
+            kept_original_names.add(seq_name)
+
+    # Compute column width: max of sequence names, #=GR tags, and #=GC tags
+    name_width = 30
+    if processed_sequences:
+        name_width = max(name_width, max(len(n) for n, _ in processed_sequences) + 1)
+    for (gr_seq, gr_feat) in gr_annotations:
+        mapped_name = id_mapping.get(gr_seq, gr_seq)
+        if mapped_name in kept_seq_names:
+            tag = f"#=GR {mapped_name} {gr_feat}"
+            name_width = max(name_width, len(tag) + 1)
+    for feature in gc_annotations:
+        tag = f"#=GC {feature}"
+        name_width = max(name_width, len(tag) + 1)
 
     # Build final corrected lines in proper Stockholm order
     corrected_lines = []
@@ -407,43 +405,29 @@ def fix_file(filepath, output_mode='file', verbose=False, cm_db=None):
     # 2. File-level annotations (#=GF) - keep at top
     corrected_lines.extend(gf_lines)
 
-    # 3. Sequence-level annotations (#=GS) for kept sequences
-    kept_seq_names = {name for name, _ in processed_sequences}
-    for orig_seq_id, ann_line in gs_gr_lines:
+    # 3. Sequence-level metadata (#=GS) for kept sequences
+    for orig_seq_id, ann_line in gs_lines:
         if orig_seq_id is None:
             corrected_lines.append(ann_line)
-        elif orig_seq_id in id_mapping:
-            mapped_name = id_mapping[orig_seq_id]
-            if mapped_name in kept_seq_names:
-                corrected_lines.append(ann_line)
-        elif orig_seq_id in kept_seq_names:
+        elif orig_seq_id in kept_original_names:
             corrected_lines.append(ann_line)
 
-    # Compute column width: max of sequence names and #=GC tag names
-    name_width = 30
-    if processed_sequences:
-        name_width = max(name_width, max(len(n) for n, _ in processed_sequences) + 1)
-    for gc_line in gc_lines:
-        parts = gc_line.strip().split(None, 2)
-        if len(parts) >= 2:
-            gc_tag = f"#=GC {parts[1]}"
-            name_width = max(name_width, len(gc_tag) + 1)
-
-    # 4. Sequences
+    # 4. Sequences with their #=GR annotations
     for new_name, seq_content in processed_sequences:
         corrected_lines.append(f"{new_name:<{name_width}} {seq_content}\n")
+        # Output #=GR annotations for this sequence
+        for (gr_seq, gr_feat), gr_data in gr_annotations.items():
+            mapped_name = id_mapping.get(gr_seq, gr_seq)
+            if mapped_name == new_name:
+                tag = f"#=GR {new_name} {gr_feat}"
+                corrected_lines.append(f"{tag:<{name_width}} {gr_data}\n")
 
     # 5. Column-level annotations (#=GC) - after sequences, aligned to same width
-    for gc_line in gc_lines:
-        parts = gc_line.strip().split(None, 2)
-        if len(parts) >= 3:
-            gc_tag = f"#=GC {parts[1]}"
-            gc_data = parts[2]
-            corrected_lines.append(f"{gc_tag:<{name_width}} {gc_data}\n")
-        else:
-            corrected_lines.append(gc_line)
+    for feature, data in gc_annotations.items():
+        tag = f"#=GC {feature}"
+        corrected_lines.append(f"{tag:<{name_width}} {data}\n")
 
-    corrected_lines.extend(footer_lines)
+    corrected_lines.append("//\n")
 
     if verbose and num_removed > 0:
         print(f"  Removed {num_removed} sequence(s) total from output")

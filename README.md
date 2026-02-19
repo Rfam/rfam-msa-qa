@@ -46,7 +46,7 @@ The validation logic is split into separate modules in the `scripts/` directory:
 - `fatal_errors.py`: Errors that cannot be automatically fixed
 - `fixable_errors.py`: Errors that can be automatically corrected (including coordinate fixing, overlap removal, and BLAST fallback)
 - `stockholm_warnings.py`: Non-critical issues
-- `parser.py`: Stockholm file parsing utilities
+- `parser.py`: Stockholm file parsing utilities (supports both single-block and interleaved multi-block format)
 - `alignment_stats.py`: Pairwise identity computation for alignment quality assessment
 - `config.py`: Configurable parameters (BLAST thresholds, cmscan E-value, NCBI request delay)
 

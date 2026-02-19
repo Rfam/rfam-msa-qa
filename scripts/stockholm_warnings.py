@@ -5,6 +5,43 @@ These are non-critical issues that don't prevent validation.
 """
 
 
+def check_ss_cons_from_parsed(gc_annotations, sequence_entries):
+    """
+    Check for 2D structure consensus annotation using pre-parsed merged data.
+
+    Args:
+        gc_annotations: dict of {feature: merged_data} from parser
+        sequence_entries: list of (seq_name, full_seq_data) tuples (merged)
+
+    Returns:
+        tuple: (has_warning, warning_message_or_list)
+    """
+    ss_cons_data = gc_annotations.get('SS_cons')
+
+    if ss_cons_data is None:
+        return True, "Missing 2D structure consensus annotation (#=GC SS_cons)"
+
+    warnings = []
+
+    # Check length matches sequences
+    ss_len = len(ss_cons_data)
+    if sequence_entries:
+        expected_len = len(sequence_entries[0][1])
+        if ss_len != expected_len:
+            warnings.append(
+                f"#=GC SS_cons length ({ss_len}) does not match "
+                f"sequence length ({expected_len})"
+            )
+
+    # Validate WUSS notation characters and bracket balancing
+    ss_warnings = validate_ss_cons_format(ss_cons_data)
+    warnings.extend(ss_warnings)
+
+    if warnings:
+        return True, warnings
+    return False, None
+
+
 def check_ss_cons(lines):
     """
     Check for 2D structure consensus annotation: existence and length.

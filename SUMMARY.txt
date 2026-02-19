@@ -4,6 +4,7 @@ Note: Where possible, biocurators should provide sequences with accession and co
 When running validate_stockholm.py --fix, the script performs these steps in order:
 
   1. Parse Stockholm file - Read and parse the input file structure
+     (supports both single-block and interleaved/multi-block format)
   2. Check known Rfam families (optional, requires --cm-db) - Run cmscan against the
      Rfam CM database to identify sequences belonging to existing families.
      Significant hits (E-value <= 1e-3 by default) are flagged as warnings but NOT removed.
