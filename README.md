@@ -100,7 +100,7 @@ When building a new Rfam family, you can check whether sequences already belong 
 3. **Press the database**: `cmpress Rfam.cm` (generates `.i1f`, `.i1i`, `.i1m`, `.i1p` index files)
 4. **Install Infernal**: `cmscan` must be available in your PATH (http://eddylab.org/infernal/)
 
-Sequences with significant cmscan hits (E-value <= 1e-3 by default) are flagged as warnings but **not removed**. Weak or spurious hits are noted separately. The E-value threshold is configurable via `CMSCAN_MAX_EVALUE` in `scripts/config.py`.
+cmscan is run with `--cut_ga` to use each model's GA (gathering) threshold, matching how Rfam curates family membership. Hits that pass GA are flagged as warnings but **not removed**. An additional E-value safety filter (`CMSCAN_MAX_EVALUE` in `scripts/config.py`, default 1e-3) is applied on top.
 
 ```bash
 # Check for known families during fixing

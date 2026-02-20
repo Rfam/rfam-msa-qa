@@ -179,14 +179,15 @@ def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_thresho
                 ungapped = seq.replace('.', '').replace('-', '')
                 f.write(f">{name}\n{ungapped}\n")
 
-        # Run cmscan
+        # Run cmscan with --cut_ga to use each model's GA (gathering) threshold,
+        # which matches how Rfam curates family membership
         tblout_path = tmpdir + '/hits.tbl'
         cmd = [
-            'cmscan', '--noali', '--tblout', tblout_path,
+            'cmscan', '--cut_ga', '--noali', '--tblout', tblout_path,
             cm_db, fasta_path
         ]
         if verbose:
-            print(f"  Scanning against known Rfam families ({cm_db}), E-value threshold={evalue_threshold}...")
+            print(f"  Scanning against known Rfam families ({cm_db}), using GA thresholds...")
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             if verbose:
@@ -219,6 +220,8 @@ def filter_known_families(sequence_entries, cm_db, verbose=False, evalue_thresho
                 except ValueError:
                     continue
 
+                # --cut_ga already filters by GA threshold; this E-value check
+                # is kept as a safety net for edge cases
                 if evalue <= evalue_threshold:
                     warned.append(seq_name)
                     detail = f"  {seq_name}: matches {family_acc} ({family_name}), E-value={evalue_str} -- WARNING"

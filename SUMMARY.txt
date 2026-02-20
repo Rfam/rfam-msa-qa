@@ -5,10 +5,10 @@ When running validate_stockholm.py --fix, the script performs these steps in ord
 
   1. Parse Stockholm file - Read and parse the input file structure
      (supports both single-block and interleaved/multi-block format)
-  2. Check known Rfam families (optional, requires --cm-db) - Run cmscan against the
-     Rfam CM database to identify sequences belonging to existing families.
-     Significant hits (E-value <= 1e-3 by default) are flagged as warnings but NOT removed.
-     Weak hits are noted separately.
+  2. Check known Rfam families (optional, requires --cm-db) - Run cmscan with --cut_ga
+     against the Rfam CM database to identify sequences belonging to existing families.
+     Uses each model's GA (gathering) threshold, matching Rfam curation criteria.
+     Hits are flagged as warnings but NOT removed (E-value safety filter at 1e-3 also applied).
      Rfam.cm must be downloaded from https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz
      and prepared with: gunzip Rfam.cm.gz && cmpress Rfam.cm
      Alternatively, build a live CM database from SVN with: python3 scripts/build_live_cm.py
